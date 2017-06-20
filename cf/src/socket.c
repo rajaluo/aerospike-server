@@ -1,7 +1,7 @@
 /*
  * socket.c
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -724,8 +724,7 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	}
 
 	if (errno != EINPROGRESS) {
-		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
-				sock->fd, errno, cf_strerror(errno));
+		cf_ticker_warning(CF_SOCKET, "Error while connecting: %d (%s)", errno, cf_strerror(errno));
 		goto cleanup0;
 	}
 
@@ -751,7 +750,7 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	int32_t count = safe_wait(efd, &event, 1, timeout);
 
 	if (count == 0) {
-		cf_warning(CF_SOCKET, "Timeout while connecting FD %d", sock->fd);
+		cf_ticker_warning(CF_SOCKET, "Timeout while connecting");
 		goto cleanup1;
 	}
 
@@ -760,8 +759,7 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	safe_getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
 
 	if (err != 0) {
-		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
-				sock->fd, err, cf_strerror(err));
+		cf_ticker_warning(CF_SOCKET, "Error while connecting: %d (%s)", err, cf_strerror(err));
 		goto cleanup1;
 	}
 
@@ -819,7 +817,7 @@ cf_socket_init_client(cf_sock_cfg *cfg, int32_t timeout, cf_socket *sock)
 	cf_socket_disable_nagle(sock);
 
 	if (connect_socket(sock, (struct sockaddr *)&sas, timeout) < 0) {
-		cf_warning(CF_SOCKET, "Error while connecting socket to %s",
+		cf_ticker_warning(CF_SOCKET, "Error while connecting socket to %s",
 				cf_sock_addr_print(&addr));
 		goto cleanup1;
 	}
@@ -1561,6 +1559,11 @@ typedef struct inter_entry_s {
 	uint8_t mac_addr[100];
 	uint32_t n_addrs;
 	cf_ip_addr addrs[MAX_ADDRS];
+
+	union {
+		struct inter_entry_s *entry;
+		uint32_t index;
+	} master;
 } inter_entry;
 
 typedef struct inter_info_s {
@@ -1595,7 +1598,8 @@ typedef void (*post_cb)(cb_context *cont);
 
 static int32_t
 netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, int32_t filter2c,
-		size_t size, reset_cb reset_fn, data_cb data_fn, post_cb post_fn, cb_context *cont)
+		int32_t filter2d, size_t size, reset_cb reset_fn, data_cb data_fn, post_cb post_fn,
+		cb_context *cont)
 {
 	int32_t res = -1;
 	int32_t nls = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
@@ -1720,7 +1724,7 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 
 				while (RTA_OK(a, a_len)) {
 					if (a->rta_type == filter2a || a->rta_type == filter2b ||
-							a->rta_type == filter2c) {
+							a->rta_type == filter2c || a->rta_type == filter2d) {
 						data_fn(cont, info, a->rta_type, RTA_DATA(a), RTA_PAYLOAD(a));
 					}
 
@@ -1819,6 +1823,15 @@ link_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
 
 		memcpy(&entry->mtu, data, len);
 		cf_detail(CF_SOCKET, "Collected interface MTU %s -> %u", entry->name, entry->mtu);
+	}
+	else if (type == IFLA_MASTER) {
+		if (len != 4) {
+			cf_crash(CF_SOCKET, "Master index has invalid length: %zu", len);
+		}
+
+		memcpy(&entry->master.index, data, len);
+		cf_detail(CF_SOCKET, "Collected interface master index %s -> %u",
+				entry->name, entry->master.index);
 	}
 }
 
@@ -2023,17 +2036,17 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 
 	reset_fn(&cont);
 
-	if (netlink_dump(RTM_GETLINK, RTM_NEWLINK, IFLA_IFNAME, IFLA_ADDRESS, IFLA_MTU,
+	if (netlink_dump(RTM_GETLINK, RTM_NEWLINK, IFLA_IFNAME, IFLA_ADDRESS, IFLA_MTU, IFLA_MASTER,
 			sizeof(struct ifinfomsg), NULL, link_fn, NULL, &cont) < 0) {
 		cf_crash(CF_SOCKET, "Error while enumerating network links");
 	}
 
-	if (netlink_dump(RTM_GETADDR, RTM_NEWADDR, IFA_LABEL, IFA_ADDRESS, IFA_LOCAL,
+	if (netlink_dump(RTM_GETADDR, RTM_NEWADDR, IFA_LABEL, IFA_ADDRESS, IFA_LOCAL, -1,
 			sizeof(struct ifaddrmsg), reset_fn, addr_fn, addr_fix_fn, &cont) < 0) {
 		cf_crash(CF_SOCKET, "Error while enumerating network addresses");
 	}
 
-	if (netlink_dump(RTM_GETROUTE, RTM_NEWROUTE, RTA_DST, RTA_OIF, RTA_PRIORITY,
+	if (netlink_dump(RTM_GETROUTE, RTM_NEWROUTE, RTA_DST, RTA_OIF, RTA_PRIORITY, -1,
 			sizeof(struct rtmsg), reset_fn, route_fn, route_fix_fn, &cont) < 0) {
 		cf_crash(CF_SOCKET, "Error while enumerating network routes");
 	}
@@ -2041,6 +2054,28 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 	for (int32_t i = 0; i < inter->n_inters; ++i) {
 		inter_entry *entry = &inter->inters[i];
 		cf_ip_addr_sort(entry->addrs, entry->n_addrs);
+
+		if (entry->master.index == 0) {
+			entry->master.entry = NULL;
+			continue;
+		}
+
+		inter_entry *master = NULL;
+
+		for (int32_t k = 0; k < inter->n_inters; ++k) {
+			inter_entry *cand = &inter->inters[k];
+
+			if (cand->index == entry->master.index) {
+				master = cand;
+				break;
+			}
+		}
+
+		if (master == NULL) {
+			cf_crash(CF_SOCKET, "Invalid master index: %u", entry->master.index);
+		}
+
+		entry->master.entry = master;
 	}
 
 	if (cf_fault_filter[CF_SOCKET] >= CF_DETAIL) {
@@ -2060,85 +2095,11 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 				cf_ip_addr *addr = &entry->addrs[k];
 				cf_detail(CF_SOCKET, "Address = %s", cf_ip_addr_print(addr));
 			}
+
+			cf_detail(CF_SOCKET, "Master = %s",
+					entry->master.entry != NULL ? entry->master.entry->name : "(none)");
 		}
 	}
-
-	// -------------------- BEGIN PARANOIA --------------------
-
-	// This double-checks that our new method returns interfaces in exactly the
-	// same order as does glibc.
-
-	bool enum_ok;
-
-	for (int32_t tries = 0; tries < 10; ++tries) {
-		enum_ok = true;
-		struct ifaddrs *legacy;
-
-		if (getifaddrs(&legacy) < 0) {
-			cf_crash(CF_SOCKET, "Error while legacy-enumerating interfaces: %d (%s)",
-					errno, cf_strerror(errno));
-		}
-
-		uint32_t n = 0;
-
-		for (struct ifaddrs *it = legacy; it != NULL; it = it->ifa_next) {
-			cf_detail(CF_SOCKET, "Checking legacy-enumerated interface %s", it->ifa_name);
-			bool found = false;
-
-			for (uint32_t i = 0; i < n; ++i) {
-				inter_entry *entry = &inter->inters[i];
-
-				if (strcmp(entry->name, it->ifa_name) == 0) {
-					cf_detail(CF_SOCKET, "Interface name matches a previous name");
-					found = true;
-					break;
-				}
-			}
-
-			if (found) {
-				continue;
-			}
-
-			cf_detail(CF_SOCKET, "Encountered new interface name");
-
-			if (n == inter->n_inters) {
-				cf_warning(CF_SOCKET, "Missed legacy-enumerated interface %s", it->ifa_name);
-				enum_ok = false;
-				break;
-			}
-
-			inter_entry *entry = &inter->inters[n];
-			cf_detail(CF_SOCKET, "Expecting interface name %s", entry->name);
-
-			if (strcmp(entry->name, it->ifa_name) != 0) {
-				cf_warning(CF_SOCKET, "Unexpected legacy-enumerated interface %s", it->ifa_name);
-				enum_ok = false;
-				break;
-			}
-
-			++n;
-		}
-
-		if (enum_ok && n < inter->n_inters) {
-			inter_entry *entry = &inter->inters[n];
-			cf_warning(CF_SOCKET, "Extraneous interface %s", entry->name);
-			enum_ok = false;
-		}
-
-		freeifaddrs(legacy);
-
-		if (enum_ok) {
-			break;
-		}
-
-		usleep(100 * 1000);
-	}
-
-	if (!enum_ok) {
-		cf_crash(CF_SOCKET, "Inconsistent interface enumeration");
-	}
-
-	// --------------------- END PARANOIA ---------------------
 }
 
 static int32_t
@@ -2232,7 +2193,8 @@ cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name
 	return inter_get_addr(addrs, n_addrs, &filter);
 }
 
-bool cf_inter_is_inter_name(const char *if_name)
+bool
+cf_inter_is_inter_name(const char *if_name)
 {
 	inter_info inter;
 	memset(&inter, 0, sizeof(inter));
@@ -2275,6 +2237,38 @@ cf_inter_addr_to_index_and_name(const cf_ip_addr *addr, int32_t *index, char **n
 	return -1;
 }
 
+void
+cf_inter_expand_bond(const char *if_name, char **out_names, uint32_t *n_out)
+{
+	inter_info inter;
+	memset(&inter, 0, sizeof(inter));
+	enumerate_inter(&inter, true);
+
+	uint32_t n = 0;
+
+	for (uint32_t i = 0; i < inter.n_inters; ++i) {
+		inter_entry *entry = &inter.inters[i];
+
+		if (entry->master.entry == NULL || strcmp(entry->master.entry->name, if_name) != 0) {
+			continue;
+		}
+
+		if (n >= *n_out) {
+			cf_crash(CF_SOCKET, "Output buffer overflow");
+		}
+
+		out_names[n] = safe_strdup(entry->name);
+		++n;
+	}
+
+	if (n == 0) {
+		out_names[0] = safe_strdup(if_name);
+		n = 1;
+	}
+
+	*n_out = n;
+}
+
 int32_t
 cf_inter_mtu(const cf_ip_addr *inter_addr)
 {
@@ -2308,7 +2302,7 @@ cf_inter_min_mtu(void)
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
 		inter_entry *entry = &inter.inters[i];
 
-		if (entry->mtu < min) {
+		if (entry->up && entry->mtu < min) {
 			min = entry->mtu;
 		}
 	}
@@ -2513,7 +2507,7 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id)
 		for (int32_t k = 0; k < 11; ++k) {
 			char tmp[100];
 			snprintf(tmp, sizeof(tmp), "%s%d", if_in_order[i], k);
-			entry = find_inter(&inter, tmp, false);
+			entry = find_inter(&inter, tmp, true);
 
 			if (entry != NULL) {
 				goto success;

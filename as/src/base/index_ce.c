@@ -60,7 +60,7 @@ as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata)
 
 
 void
-as_index_reduce_partial_live(as_index_tree *tree, uint32_t sample_count,
+as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count,
 		as_index_reduce_fn cb, void *udata)
 {
 	as_index_reduce_partial(tree, sample_count, cb, udata);

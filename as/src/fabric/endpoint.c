@@ -22,9 +22,15 @@
 
 #include "fabric/endpoint.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "citrusleaf/alloc.h"
+
+#include "fault.h"
 
 #include "base/cfg.h"
 

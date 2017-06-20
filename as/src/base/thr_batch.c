@@ -39,7 +39,7 @@
 
 #include "dynbuf.h"
 #include "hist.h"
-#include "util.h"
+#include "node.h"
 #include "socket.h"
 
 #include "base/cfg.h"
@@ -99,7 +99,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 				*bb_r = cf_buf_builder_create_size(1024 * 4);
 			}
 
-			int rv = as_partition_reserve_read(ns, as_partition_getid(bmd->keyd), &rsv, &other_node, &cluster_key);
+			int rv = as_partition_reserve_read(ns, as_partition_getid(&bmd->keyd), &rsv, &other_node, &cluster_key);
 
 			if (rv == 0) {
 				as_index_ref r_ref;
@@ -109,15 +109,15 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 				if (rec_rv == 0) {
 					as_index *r = r_ref.r;
 
-					// Check to see this isn't an expired record waiting to die.
-					if (as_record_is_expired(r)) {
+					// Check to see this isn't a record waiting to die.
+					if (as_record_is_doomed(r, ns)) {
 						as_msg_make_error_response_bufbuilder(&bmd->keyd, AS_PROTO_RESULT_FAIL_NOTFOUND, bb_r, ns->name);
 					}
 					else {
 						// Make sure it's brought in from storage if necessary.
 						as_storage_rd rd;
 						if (get_data) {
-							as_storage_record_open(ns, r, &rd, &r->key);
+							as_storage_record_open(ns, r, &rd);
 							as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 						}
 
@@ -330,7 +330,7 @@ int
 as_batch_direct_init()
 {
 	uint32_t threads = g_config.n_batch_threads;
-	cf_info(AS_BATCH, "Initialize batch-threads to %u", threads);
+	cf_info(AS_BATCH, "starting %u batch-threads", threads);
 	int status = as_thread_pool_init_fixed(&batch_direct_thread_pool, threads, batch_worker, sizeof(batch_transaction), offsetof(batch_transaction,complete));
 
 	if (status) {
@@ -358,7 +358,7 @@ as_batch_direct_queue_task(as_transaction* tr, as_namespace *ns)
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	uint n_digests = dfp->field_sz / sizeof(cf_digest);
+	uint32_t n_digests = dfp->field_sz / sizeof(cf_digest);
 
 	if (n_digests > g_config.batch_max_requests) {
 		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u.", n_digests, g_config.batch_max_requests);
@@ -424,7 +424,7 @@ as_batch_direct_threads_resize(uint32_t threads)
 
 	if (status) {
 		cf_warning(AS_BATCH, "Failed to resize batch-threads. status=%d, batch-threads=%d",
-				status, g_config.n_batch_index_threads);
+				status, g_config.n_batch_threads);
 	}
 	return status;
 }

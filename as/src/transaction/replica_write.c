@@ -37,7 +37,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -47,6 +47,7 @@
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
+#include "base/truncate.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs
 #include "fabric/partition.h"
@@ -86,9 +87,8 @@ bool ldt_get_prole_version(as_partition_reservation* rsv, cf_digest* keyd,
 void ldt_set_prole_subrec_version(uint32_t info, const ldt_prole_info* linfo,
 		cf_digest* keyd);
 
-int delete_replica(as_partition_reservation* rsv, cf_digest* keyd,
-		bool is_subrec, bool is_nsup_delete, bool is_xdr_op, cf_node master);
-
+int drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
+		bool is_nsup_delete, bool is_xdr_op, cf_node master);
 int write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		uint8_t* pickled_buf, size_t pickled_sz,
 		const as_rec_props* p_rec_props, as_generation generation,
@@ -110,6 +110,9 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 		return false;
 	}
 
+	// TODO - remove this when we're comfortable:
+	cf_assert(rw->pickled_buf, AS_RW, "making repl-write msg with null pickle");
+
 	as_namespace* ns = tr->rsv.ns;
 	msg* m = rw->dest_msg;
 
@@ -119,17 +122,25 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
-	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
-	msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
-	msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
-	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
+	if (tr->generation != 0) {
+		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
+	}
+
+	if (tr->void_time != 0) {
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+	}
+
+	if (tr->last_update_time != 0) {
+		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
+	}
 
 	// TODO - do we really intend to send this if the record is non-LDT?
+	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled) {
-		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version_info,
-				sizeof(as_partition_vinfo), MSG_SET_COPY);
+		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
+				sizeof(as_partition_version), MSG_SET_COPY);
 
 		if (tr->rsv.p->current_outgoing_ldt_version != 0) {
 			msg_set_uint64(m, RW_FIELD_LDT_VERSION,
@@ -148,45 +159,57 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 		return true;
 	}
 
+	// TODO - deal with this on the write-becomes-drop & udf-drop paths?
+	clear_delete_response_metadata(rw, tr);
+
 	uint32_t info = pack_info_bits(tr, rw->has_udf);
 
-	if (rw->pickled_buf) {
-		// Replica writes.
+	repl_write_flag_pickle(tr, rw->pickled_buf, &info);
 
-		clear_delete_response_metadata(rw, tr);
-		repl_write_flag_pickle(tr, rw->pickled_buf, &info);
+	bool is_sub;
+	bool is_parent;
 
-		bool is_sub;
-		bool is_parent;
+	as_ldt_get_property(&rw->pickled_rec_props, &is_parent, &is_sub);
+	info |= pack_ldt_info_bits(tr, is_parent, is_sub);
 
-		as_ldt_get_property(&rw->pickled_rec_props, &is_parent, &is_sub);
-		info |= pack_ldt_info_bits(tr, is_parent, is_sub);
+	msg_set_buf(m, RW_FIELD_RECORD, (void*)rw->pickled_buf, rw->pickled_sz,
+			MSG_SET_HANDOFF_MALLOC);
 
-		msg_set_buf(m, RW_FIELD_RECORD, (void*)rw->pickled_buf, rw->pickled_sz,
-				MSG_SET_HANDOFF_MALLOC);
+	// Make sure destructor doesn't free this.
+	rw->pickled_buf = NULL;
 
-		// Make sure destructor doesn't free this.
-		rw->pickled_buf = NULL;
+	// TODO - replace rw->pickled_rec_props with individual fields.
+	if (rw->pickled_rec_props.p_data) {
+		const char* set_name;
+		uint32_t set_name_size;
 
-		if (rw->pickled_rec_props.p_data) {
-			msg_set_buf(m, RW_FIELD_REC_PROPS, rw->pickled_rec_props.p_data,
-					rw->pickled_rec_props.size, MSG_SET_HANDOFF_MALLOC);
+		if (as_rec_props_get_value(&rw->pickled_rec_props,
+				CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
+				(uint8_t**)&set_name) == 0) {
+			msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+					set_name_size - 1, MSG_SET_COPY);
+		}
 
-			// Make sure destructor doesn't free the data.
-			as_rec_props_clear(&rw->pickled_rec_props);
+		uint32_t key_size;
+		uint8_t* key;
+
+		if (as_rec_props_get_value(&rw->pickled_rec_props,
+				CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
+			msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
+		}
+
+		uint16_t* ldt_bits;
+
+		if ((as_rec_props_get_value(&rw->pickled_rec_props,
+				CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+				(uint8_t**)&ldt_bits) == 0)) {
+			msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
 		}
 	}
-	else {
-		// Replica deletes.
 
-		msg_set_buf(m, RW_FIELD_AS_MSG, (void*)tr->msgp,
-				as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
-
-		info |= pack_ldt_info_bits(tr, false, false);
+	if (info != 0) {
+		msg_set_uint32(m, RW_FIELD_INFO, info);
 	}
-
-	// TODO - add 0 check if older code handler doesn't require field.
-	msg_set_uint32(m, RW_FIELD_INFO, info);
 
 	return true;
 }
@@ -287,9 +310,9 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	as_partition_reservation rsv;
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
-	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
+	if (rsv.reject_repl_write) {
 		as_partition_release(&rsv);
 		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 		return;
@@ -308,33 +331,26 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
-	cl_msg* msgp;
-
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
 	uint32_t result;
 
-	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
+	// TODO POST-JUMP - reverse if & else, un-indent...
+	if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf, &pickled_sz,
 			MSG_GET_DIRECT) == 0) {
-		// <><><><><><>  Delete Operation  <><><><><><>
+		if (repl_write_pickle_is_drop(pickled_buf, info)) {
+			result = drop_replica(&rsv, keyd,
+					(info & RW_INFO_LDT_SUBREC) != 0,
+					(info & RW_INFO_NSUP_DELETE) != 0,
+					(info & RW_INFO_XDR) != 0,
+					node);
 
-		// TODO - does this really need to be here? Just to fill linfo?
-		if (! ldt_get_prole_version(&rsv, keyd, &linfo, info, NULL, false)) {
 			as_partition_release(&rsv);
-			send_repl_write_ack(node, m, AS_PROTO_RESULT_OK); // ???
+			send_repl_write_ack(node, m, result);
+
 			return;
 		}
-
-		result = delete_replica(&rsv, keyd,
-				(info & RW_INFO_LDT_SUBREC) != 0,
-				(info & RW_INFO_NSUP_DELETE) != 0,
-				as_msg_is_xdr(&msgp->msg),
-				node);
-	}
-	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
-			&pickled_sz, MSG_GET_DIRECT) == 0) {
-		// <><><><><><>  Write Pickle  <><><><><><>
 
 		as_generation generation;
 
@@ -345,18 +361,46 @@ repl_write_handle_op(cf_node node, msg* m)
 			return;
 		}
 
+		uint64_t last_update_time;
+
+		if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+				&last_update_time) != 0) {
+			cf_warning(AS_RW, "repl_write_handle_op: no last-update-time");
+			as_partition_release(&rsv);
+			send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			return;
+		}
+
 		uint32_t void_time = 0;
-		uint64_t last_update_time = 0;
 
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
-		as_rec_props rec_props = { NULL, 0 };
-		size_t rec_props_size = 0;
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
 
-		msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data, &rec_props_size,
+		msg_get_buf(m, RW_FIELD_SET_NAME, &set_name, &set_name_len,
 				MSG_GET_DIRECT);
-		rec_props.size = (uint32_t)rec_props_size;
+
+		uint8_t *key = NULL;
+		size_t key_size = 0;
+
+		msg_get_buf(m, RW_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+		uint32_t ldt_bits = 0;
+
+		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
+
+		size_t rec_props_data_size = as_rec_props_size_all(set_name,
+				set_name_len, key, key_size, ldt_bits);
+		uint8_t rec_props_data[rec_props_data_size];
+		as_rec_props rec_props = { 0 };
+
+		if (rec_props_data_size != 0) {
+			rec_props.p_data = rec_props_data;
+
+			as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
+					set_name_len, key, key_size, ldt_bits);
+		}
 
 		result = write_replica(&rsv, keyd, pickled_buf, pickled_sz, &rec_props,
 				generation, void_time, last_update_time, node, info, &linfo);
@@ -399,12 +443,17 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	// TODO - result_code is currently ignored! What should we do with it?
-	// Note - CLUSTER_KEY_MISMATCH not special, can't re-queue transaction.
+	// TODO - handle failure results other than CLUSTER_KEY_MISMATCH.
 	uint32_t result_code;
 
 	if (msg_get_uint32(m, RW_FIELD_RESULT, &result_code) != 0) {
 		cf_warning(AS_RW, "repl-write ack: no result_code");
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	// TODO - force retransmit to happen faster than default.
+	if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -492,6 +541,9 @@ void
 repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 		size_t pickled_sz, as_rec_props* p_pickled_rec_props, bool is_subrec)
 {
+	// TODO - remove this when we're comfortable:
+	cf_assert(*p_pickled_buf, AS_RW, "making LDT-repl msg with null pickle");
+
 	as_namespace* ns = tr->rsv.ns;
 
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE);
@@ -500,16 +552,19 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
-	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
 
 	msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
-	msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
 	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
 
+	if (tr->void_time != 0) {
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+	}
+
 	// TODO - do we really get here if ldt_enabled is false?
+	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled && ! is_subrec) {
-		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version_info,
-				sizeof(as_partition_vinfo), MSG_SET_COPY);
+		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
+				sizeof(as_partition_version), MSG_SET_COPY);
 
 		if (tr->rsv.p->current_outgoing_ldt_version != 0) {
 			msg_set_uint64(m, RW_FIELD_LDT_VERSION,
@@ -519,31 +574,47 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 
 	uint32_t info = pack_info_bits(tr, true);
 
-	if (*p_pickled_buf) {
-		bool is_sub;
-		bool is_parent;
+	bool is_sub;
+	bool is_parent;
 
-		as_ldt_get_property(p_pickled_rec_props, &is_parent, &is_sub);
-		info |= pack_ldt_info_bits(tr, is_parent, is_sub);
+	as_ldt_get_property(p_pickled_rec_props, &is_parent, &is_sub);
+	info |= pack_ldt_info_bits(tr, is_parent, is_sub);
 
-		msg_set_buf(m, RW_FIELD_RECORD, (void*)*p_pickled_buf, pickled_sz,
-				MSG_SET_HANDOFF_MALLOC);
-		*p_pickled_buf = NULL;
+	msg_set_buf(m, RW_FIELD_RECORD, (void*)*p_pickled_buf, pickled_sz,
+			MSG_SET_HANDOFF_MALLOC);
+	*p_pickled_buf = NULL;
 
-		if (p_pickled_rec_props && p_pickled_rec_props->p_data) {
-			msg_set_buf(m, RW_FIELD_REC_PROPS, p_pickled_rec_props->p_data,
-					p_pickled_rec_props->size, MSG_SET_HANDOFF_MALLOC);
-			as_rec_props_clear(p_pickled_rec_props);
+	if (p_pickled_rec_props && p_pickled_rec_props->p_data) {
+		const char* set_name;
+		uint32_t set_name_size;
+
+		if (as_rec_props_get_value(p_pickled_rec_props,
+				CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
+				(uint8_t**)&set_name) == 0) {
+			msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+					set_name_size - 1, MSG_SET_COPY);
+		}
+
+		uint32_t key_size;
+		uint8_t* key;
+
+		if (as_rec_props_get_value(p_pickled_rec_props, CL_REC_PROPS_FIELD_KEY,
+				&key_size, &key) == 0) {
+			msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
+		}
+
+		uint16_t* ldt_bits;
+
+		if ((as_rec_props_get_value(p_pickled_rec_props,
+				CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+				(uint8_t**)&ldt_bits) == 0)) {
+			msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
 		}
 	}
-	else {
-		msg_set_buf(m, RW_FIELD_AS_MSG, (void*)tr->msgp,
-				as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
 
-		info |= pack_ldt_info_bits(tr, false, is_subrec);
+	if (info != 0) {
+		msg_set_uint32(m, RW_FIELD_INFO, info);
 	}
-
-	msg_set_uint32(m, RW_FIELD_INFO, info);
 }
 
 
@@ -598,9 +669,9 @@ repl_write_handle_multiop(cf_node node, msg* m)
 
 	as_partition_reservation rsv;
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
-	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
+	if (rsv.reject_repl_write) {
 		as_partition_release(&rsv);
 		send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 		return;
@@ -733,8 +804,7 @@ send_repl_write_ack(cf_node node, msg* m, uint32_t result)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -749,8 +819,7 @@ send_multiop_ack(cf_node node, msg* m, uint32_t result)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_MULTI_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -787,21 +856,22 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 
 	ldt_set_prole_subrec_version(info, linfo, keyd);
 
-	cl_msg* msgp;
-
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
-	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
-			MSG_GET_DIRECT) == 0) {
-		delete_replica(rsv, keyd,
-				(info & RW_INFO_LDT_SUBREC) != 0,
-				(info & RW_INFO_NSUP_DELETE) != 0,
-				as_msg_is_xdr(&msgp->msg),
-				node);
-	}
-	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
+	// TODO POST-JUMP - reverse if & else, un-indent...
+	if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
 			&pickled_sz, MSG_GET_DIRECT) == 0) {
+		if (repl_write_pickle_is_drop(pickled_buf, info)) {
+			drop_replica(rsv, keyd,
+					(info & RW_INFO_LDT_SUBREC) != 0,
+					(info & RW_INFO_NSUP_DELETE) != 0,
+					(info & RW_INFO_XDR) != 0,
+					node);
+
+			return true;
+		}
+
 		as_generation generation;
 
 		if (msg_get_uint32(m, RW_FIELD_GENERATION, &generation) != 0) {
@@ -809,18 +879,45 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 			return true;
 		}
 
+		uint64_t last_update_time;
+
+		if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+				&last_update_time) != 0) {
+			cf_warning(AS_RW, "handle_multiop_subop: no last-update-time");
+			return true;
+		}
+
 		uint32_t void_time = 0;
-		uint64_t last_update_time = 0;
 
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
-		as_rec_props rec_props = { NULL, 0 };
-		size_t rec_props_size = 0;
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
 
-		msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data, &rec_props_size,
+		msg_get_buf(m, RW_FIELD_SET_NAME, &set_name, &set_name_len,
 				MSG_GET_DIRECT);
-		rec_props.size = (uint32_t)rec_props_size;
+
+		uint8_t *key = NULL;
+		size_t key_size = 0;
+
+		msg_get_buf(m, RW_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+		uint32_t ldt_bits = 0;
+
+		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
+
+		size_t rec_props_data_size = as_rec_props_size_all(set_name,
+				set_name_len, key, key_size, ldt_bits);
+		uint8_t rec_props_data[rec_props_data_size];
+
+		as_rec_props rec_props = { 0 };
+
+		if (rec_props_data_size != 0) {
+			rec_props.p_data = rec_props_data;
+
+			as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
+					set_name_len, key, key_size, ldt_bits);
+		}
 
 		write_replica(rsv, keyd, pickled_buf, pickled_sz, &rec_props,
 				generation, void_time, last_update_time, node, info, linfo);
@@ -837,7 +934,7 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 bool
 ldt_get_info(ldt_prole_info* linfo, msg* m, as_partition_reservation* rsv)
 {
-	as_partition_vinfo* source_vinfo;
+	as_partition_version* source_vinfo;
 
 	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo, NULL,
 			MSG_GET_DIRECT) != 0) {
@@ -845,8 +942,7 @@ ldt_get_info(ldt_prole_info* linfo, msg* m, as_partition_reservation* rsv)
 	}
 
 	linfo->replication_partition_version_match =
-			as_partition_vinfo_same(source_vinfo, &rsv->p->version_info);
-
+			as_partition_version_same(source_vinfo, &rsv->p->version);
 	linfo->ldt_source_version = 0;
 	linfo->ldt_source_version_set = false;
 
@@ -909,11 +1005,11 @@ ldt_set_prole_subrec_version(uint32_t info, const ldt_prole_info* linfo,
 
 
 //==========================================================
-// Local helpers - delete replicas.
+// Local helpers - drop  or write replicas.
 //
 
 int
-delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
+drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 		bool is_nsup_delete, bool is_xdr_op, cf_node master)
 {
 	// Shortcut pointers & flags.
@@ -928,17 +1024,14 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(tree, keyd, &r_ref, ns) != 0) {
+	if (as_record_get(tree, keyd, &r_ref) != 0) {
 		return AS_PROTO_RESULT_FAIL_NOTFOUND;
 	}
 
 	as_record* r = r_ref.r;
 
 	if (ns->storage_data_in_memory) {
-		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, keyd);
-		delete_adjust_sindex(&rd);
-		as_storage_record_close(&rd);
+		record_delete_adjust_sindex(r, ns);
 	}
 
 	// Save the set-ID for XDR.
@@ -955,10 +1048,6 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 }
 
 
-//==========================================================
-// Local helpers - write replicas.
-//
-
 int
 write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		uint8_t* pickled_buf, size_t pickled_sz,
@@ -970,10 +1059,10 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	if (! as_storage_has_space(ns)) {
 		cf_warning(AS_RW, "{%s} write_replica: drives full", ns->name);
-		return AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE;
+		return AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
 	}
 
-	JEM_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA(ns);
 
 	bool is_subrec = (info & RW_INFO_LDT_SUBREC) != 0;
 	bool is_ldt_parent = (info & RW_INFO_LDT_PARENTREC) != 0;
@@ -999,15 +1088,15 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	bool is_create = false;
 
 	if (rv == 1) {
-		as_storage_record_create(ns, r, &rd, keyd);
+		as_storage_record_create(ns, r, &rd);
 		is_create = true;
 	}
 	else {
-		as_storage_record_open(ns, r, &rd, keyd);
+		as_storage_record_open(ns, r, &rd);
 	}
 
 	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0 ||
-			(is_create && as_sindex_ns_has_sindex(ns));
+			(is_create && record_has_sindex(r, ns));
 
 	rd.ignore_record_on_device = ! has_sindex && ! is_ldt_parent;
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
@@ -1024,8 +1113,23 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
-	uint32_t stack_particles_sz = rd.ns->storage_data_in_memory ?
-			0 : as_record_buf_get_stack_particles_sz(pickled_buf);
+	int32_t stack_particles_sz = 0;
+
+	if (! rd.ns->storage_data_in_memory) {
+		stack_particles_sz = as_record_buf_get_stack_particles_sz(pickled_buf);
+
+		if (stack_particles_sz < 0) {
+			if (is_create) {
+				as_index_delete(tree, keyd);
+			}
+
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+
+			return -stack_particles_sz;
+		}
+	}
+
 	uint8_t stack_particles[stack_particles_sz + 256];
 	uint8_t* p_stack_particles = stack_particles;
 	// + 256 for LDT control bin, to hold version.
@@ -1046,6 +1150,18 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	as_record_set_properties(&rd, p_rec_props);
 
+	if (is_create) {
+		r->last_update_time = last_update_time;
+
+		if (as_truncate_record_is_truncated(r, ns)) {
+			as_index_delete(tree, keyd);
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+
+			return AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		}
+	}
+
 	if (as_record_unpickle_replace(r, &rd, pickled_buf, pickled_sz,
 			&p_stack_particles, has_sindex) != 0) {
 		if (is_create) {
@@ -1059,7 +1175,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	}
 
 	r->generation = generation;
-	r->void_time = void_time;
+	r->void_time = truncate_void_time(ns, void_time);
 	r->last_update_time = last_update_time;
 
 	uint64_t version_to_set = 0;
@@ -1087,15 +1203,14 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		}
 	}
 
-	bool is_delete = as_record_apply_replica(&rd, info, tree);
+	bool is_durable_delete = as_record_apply_replica(&rd, info, tree);
 
 	uint16_t set_id = as_index_get_set_id(r);
 	xdr_op_type op_type = XDR_OP_TYPE_WRITE;
 
-	if (is_delete) {
+	if (is_durable_delete) {
 		generation = 0;
-		op_type = rd.is_durable_delete ?
-				XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP;
+		op_type = XDR_OP_TYPE_DURABLE_DELETE;
 	}
 
 	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
@@ -1103,7 +1218,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! is_xdr_delete_shipping_enabled()) {
+	if (is_durable_delete && ! is_xdr_delete_shipping_enabled()) {
 		// TODO - should we also not ship if there was no record here before?
 		return AS_PROTO_RESULT_OK;
 	}

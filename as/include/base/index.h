@@ -45,10 +45,10 @@
 typedef struct as_index_s {
 
 	// offset: 0
-	cf_atomic32 rc;		// must be on 4-byte boundary
+	cf_atomic32 rc;
 
 	// offset: 4
-	cf_digest key;		// 20 bytes
+	cf_digest keyd;
 
 	// offset: 24
 	uint64_t right_h: 40;
@@ -57,7 +57,7 @@ typedef struct as_index_s {
 	// offset: 34
 	// Don't use the free bits here for record info - this is accessed outside
 	// the record lock.
-	uint16_t color: 1; // one bit
+	uint16_t color: 1;
 	uint16_t unused_but_unsafe: 15;
 
 	// Everything below here is used under the record lock.
@@ -73,29 +73,23 @@ typedef struct as_index_s {
 
 	// offset: 47
 	// Used by the storage engines.
-	union {
-		struct {
-			uint64_t rblock_id: 34;		// can address 2^34 * 128b = 2Tb drive
-			uint64_t n_rblocks: 14;		// is enough for 1Mb/128b = 8K rblocks
-			uint64_t file_id: 6;		// can spec 2^6 = 64 drives
-			uint64_t set_id_bits: 10;	// do not use directly, used for set-ID
-		} ssd;
-		struct {
-			uint32_t file_id: 6;
-		} kv;
-	} storage_key;
+	uint64_t rblock_id: 34;		// can address 2^34 * 128b = 2Tb drive
+	uint64_t n_rblocks: 14;		// is enough for 1Mb/128b = 8K rblocks
+	uint64_t file_id: 6;		// can spec 2^6 = 64 drives
+
+	uint64_t set_id_bits: 10;	// do not use directly, used for set-ID
 
 	// offset: 55
 	// In single-bin mode for data-in-memory namespaces, this is cast to an
 	// as_bin, though only the last 4 bits get used (for the iparticle state).
-	// The first 4 bits are used for index flags. Do not use flex_bits_2
+	// The first 4 bits are used for index flags. Do not use flex_bits
 	// directly - use access functions!
 	uint8_t flex_bits;
 
 	// offset: 56
 	// For data-not-in-memory namespaces, these 8 bytes are currently unused.
 	// For data-in-memory namespaces: in single-bin mode the as_bin is embedded
-	// here (these 8 bytes plus the last 4 bits in flex_bits_2 above), but in
+	// here (these 8 bytes plus the last 4 bits in flex_bits above), but in
 	// multi-bin mode this is a pointer to either of:
 	// - an as_bin_space containing n_bins and an array of as_bin structs
 	// - an as_rec_space containing an as_bin_space pointer and other metadata
@@ -215,19 +209,19 @@ void as_index_set_bin_space(as_index* index, as_bin_space* bin_space) {
 //
 
 static inline
-uint16_t as_index_get_set_id(as_index *index) {
-	return index->storage_key.ssd.set_id_bits;
+uint16_t as_index_get_set_id(const as_index *index) {
+	return index->set_id_bits;
 }
 
 static inline
 void as_index_set_set_id(as_index *index, uint16_t set_id) {
 	// TODO - check that it fits in the 10 bits ???
-	index->storage_key.ssd.set_id_bits = set_id;
+	index->set_id_bits = set_id;
 }
 
 static inline
-bool as_index_has_set(as_index *index) {
-	return index->storage_key.ssd.set_id_bits != 0;
+bool as_index_has_set(const as_index *index) {
+	return index->set_id_bits != 0;
 }
 
 
@@ -236,10 +230,10 @@ bool as_index_has_set(as_index *index) {
 //
 
 static inline
-int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
-		bool apply_restrictions) {
+int as_index_set_set_w_len(as_index *index, as_namespace *ns,
+		const char *set_name, size_t len, bool apply_restrictions) {
 	uint16_t set_id;
-	int rv = as_namespace_get_create_set(ns, set_name, &set_id,
+	int rv = as_namespace_set_set_w_len(ns, set_name, len, &set_id,
 			apply_restrictions);
 
 	if (rv != 0) {
@@ -251,18 +245,10 @@ int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
 }
 
 static inline
-int as_index_set_set_w_len(as_index *index, as_namespace *ns,
-		const char *set_name, size_t len, bool apply_restrictions) {
-	uint16_t set_id;
-	int rv = as_namespace_get_create_set_w_len(ns, set_name, len, &set_id,
-			apply_restrictions);
-
-	if (rv != 0) {
-		return rv;
-	}
-
-	as_index_set_set_id(index, set_id);
-	return 0;
+int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
+		bool apply_restrictions) {
+	return as_index_set_set_w_len(index, ns, set_name, strlen(set_name),
+		apply_restrictions);
 }
 
 static inline
@@ -318,7 +304,7 @@ typedef struct as_lock_pair_s {
 
 typedef struct as_sprig_s {
 	cf_arenax_handle	root_h;
-	uint32_t			n_elements;
+	uint64_t			n_elements;
 } as_sprig;
 
 static inline as_lock_pair *
@@ -345,15 +331,15 @@ as_index_tree *as_index_tree_create(as_index_tree_shared *shared, cf_arenax *are
 as_index_tree *as_index_tree_resume(as_index_tree_shared *shared, cf_arenax *arena, as_treex *treex);
 void as_index_tree_shutdown(as_index_tree *tree, as_treex *treex);
 int as_index_tree_release(as_index_tree *tree);
-uint32_t as_index_tree_size(as_index_tree *tree);
+uint64_t as_index_tree_size(as_index_tree *tree);
 
 typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);
 
 void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
 void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_partial_live(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
 int as_index_exists(as_index_tree *tree, cf_digest *keyd);
 int as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
@@ -362,10 +348,6 @@ int as_index_delete(as_index_tree *tree, cf_digest *keyd);
 
 #define as_index_reserve(_r) cf_atomic32_incr(&(_r->rc))
 #define as_index_release(_r) cf_atomic32_decr(&(_r->rc))
-
-#ifdef USE_KV
-int as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index_ref, bool create_p, as_namespace *ns);
-#endif
 
 
 //------------------------------------------------
@@ -388,4 +370,4 @@ typedef struct as_index_sprig_s {
 #define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(isprig->arena, __h))
 
 // Flag to indicate full index reduce.
-#define AS_REDUCE_ALL (-1)
+#define AS_REDUCE_ALL (-1L)

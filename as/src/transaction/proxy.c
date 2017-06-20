@@ -42,8 +42,8 @@
 #include "dynbuf.h"
 #include "fault.h"
 #include "msg.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
 
 #include "base/batch.h"
 #include "base/datamodel.h"
@@ -51,9 +51,9 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/stats.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
-#include "fabric/paxos.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
@@ -141,13 +141,8 @@ typedef struct proxy_request_s {
 //
 
 void* run_proxy_retransmit(void* arg);
-int proxy_retransmit_reduce_fn(void* key, void* data, void* udata);
+int proxy_retransmit_reduce_fn(const void* key, void* data, void* udata);
 int proxy_retransmit_send(proxy_request* pr);
-
-void on_proxy_paxos_change(as_paxos_generation gen, as_paxos_change* change,
-		cf_node succession[], void* udata);
-int proxy_paxos_change_reduce_fn(void* key, void* data, void* udata);
-int proxy_paxos_change_delete_reduce_fn(void* key, void* data, void* udata);
 
 int proxy_msg_cb(cf_node src, msg* m, void* udata);
 
@@ -163,9 +158,9 @@ void shipop_handle_client_response(msg* m, rw_request* rw);
 void shipop_timeout_handler(proxy_request* pr);
 
 static inline uint32_t
-proxy_hash_fn(void* value)
+proxy_hash_fn(const void* value)
 {
-	return *(uint32_t*)value;
+	return *(const uint32_t*)value;
 }
 
 static inline void
@@ -235,8 +230,6 @@ as_proxy_init()
 		cf_crash(AS_RW, "failed to create proxy retransmit thread");
 	}
 
-	as_paxos_register_change_callback(on_proxy_paxos_change, NULL);
-
 	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt),
 			PROXY_MSG_SCRATCH_SIZE, proxy_msg_cb, NULL);
 }
@@ -254,7 +247,7 @@ bool
 as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns,
 		uint64_t cluster_key)
 {
-	uint32_t pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(&tr->keyd);
 
 	// Get a fabric message and fill it out.
 
@@ -315,8 +308,7 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns,
 
 	msg_incr_ref(m);
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 
@@ -334,7 +326,7 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 		return;
 	}
 
-	uint32_t pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(&tr->keyd);
 	cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
@@ -342,7 +334,7 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 	msg_set_uint64(m, PROXY_FIELD_REDIRECT,
 			redirect_node == (cf_node)0 ? tr->from.proxy_node : redirect_node);
 
-	if (as_fabric_send(tr->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+	if (as_fabric_send(tr->from.proxy_node, m, AS_FABRIC_CHANNEL_RW) !=
 			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
@@ -372,8 +364,7 @@ as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (uint8_t*)msgp, msg_sz,
 			MSG_SET_HANDOFF_MALLOC);
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -404,8 +395,7 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 		db->buf = NULL; // the fabric owns the buffer now
 	}
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -415,7 +405,7 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 void
 as_proxy_shipop(cf_node dst, rw_request* rw)
 {
-	uint32_t pid = as_partition_getid(rw->keyd);
+	uint32_t pid = as_partition_getid(&rw->keyd);
 
 	// Get a fabric message and fill it out.
 
@@ -433,7 +423,7 @@ as_proxy_shipop(cf_node dst, rw_request* rw)
 			MSG_SET_COPY);
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)rw->msgp,
 			as_proto_size_get(&rw->msgp->proto), MSG_SET_HANDOFF_MALLOC);
-	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, as_paxos_get_cluster_key());
+	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, as_exchange_cluster_key());
 	msg_set_uint32(m, PROXY_FIELD_INFO, PROXY_INFO_SHIPPED_OP);
 
 	rw->msgp = NULL;
@@ -472,8 +462,7 @@ as_proxy_shipop(cf_node dst, rw_request* rw)
 
 	msg_incr_ref(m);
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -609,7 +598,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 
 		msg_incr_ref(pr->fab_msg);
 
-		if (as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_PRIORITY_MEDIUM) !=
+		if (as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_CHANNEL_RW) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(pr->fab_msg);
 		}
@@ -699,7 +688,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		uint64_t cluster_key;
 
 		if (msg_get_uint64(m, PROXY_FIELD_CLUSTER_KEY, &cluster_key) == 0 &&
-				cluster_key != as_paxos_get_cluster_key()) {
+				cluster_key != as_exchange_cluster_key()) {
 			error_response(src, tid, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 			return;
 		}
@@ -756,7 +745,7 @@ run_proxy_retransmit(void* arg)
 
 
 int
-proxy_retransmit_reduce_fn(void* key, void* data, void* udata)
+proxy_retransmit_reduce_fn(const void* key, void* data, void* udata)
 {
 	proxy_request* pr = data;
 	now_times* now = (now_times*)udata;
@@ -823,8 +812,7 @@ proxy_retransmit_send(proxy_request* pr)
 
 		msg_incr_ref(pr->fab_msg);
 
-		int rv = as_fabric_send(pr->dest, pr->fab_msg,
-				AS_FABRIC_PRIORITY_MEDIUM);
+		int rv = as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_CHANNEL_RW);
 
 		if (rv == AS_FABRIC_SUCCESS) {
 			return SHASH_OK;
@@ -842,6 +830,11 @@ proxy_retransmit_send(proxy_request* pr)
 		// to just send to the master and not pay attention to whether it's read
 		// or write.)
 		cf_node new_dst = as_partition_writable_node(pr->ns, pr->pid);
+
+		// Partition is frozen - try more retransmits, but will likely time out.
+		if (new_dst == (cf_node)0) {
+			return SHASH_OK;
+		}
 
 		// Destination is self - abandon proxy and try local transaction.
 		if (new_dst == g_config.self_node) {
@@ -886,88 +879,6 @@ proxy_retransmit_send(proxy_request* pr)
 
 	// For now, it's impossible to get here.
 	return SHASH_ERR;
-}
-
-
-//==========================================================
-// Local helpers - handle paxos changed events.
-//
-
-void
-on_proxy_paxos_change(as_paxos_generation gen, as_paxos_change* change,
-		cf_node succession[], void* udata)
-{
-	if (change->n_change != 1 || change->type[0] != AS_PAXOS_CHANGE_SYNC) {
-		cf_crash(AS_PROXY, "unexpected paxos-changed event data");
-	}
-
-	rw_paxos_change_struct del;
-
-	memset(&del, 0, sizeof(rw_paxos_change_struct));
-	memcpy(del.succession, succession, sizeof(cf_node) * AS_CLUSTER_SZ);
-
-	// Iterate through the hash table and find nodes that are not in the
-	// succession list. Remove these entries from the hash table.
-	shash_reduce(g_proxy_hash, proxy_paxos_change_reduce_fn, (void*)&del);
-
-	// If there are nodes to be deleted, execute the deletion algorithm.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (del.deletions[i] == (cf_node)0) {
-			break;
-		}
-
-		shash_reduce(g_proxy_hash, proxy_paxos_change_delete_reduce_fn,
-				(void*)&del.deletions[i]);
-	}
-}
-
-
-int
-proxy_paxos_change_reduce_fn(void* key, void* data, void* udata)
-{
-	proxy_request* pr = (proxy_request*)data;
-	rw_paxos_change_struct* del = (rw_paxos_change_struct*)udata;
-
-	// Check if this key is in the succession list.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (del->succession[i] == (cf_node)0) {
-			break;
-		}
-
-		if (pr->dest == del->succession[i]) {
-			return 0;
-		}
-	}
-
-	// This key is not in succession list - mark it to be deleted.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		// If an empty slot exists, then it means key is not there yet.
-		if (del->deletions[i] == (cf_node)0) {
-			del->deletions[i] = pr->dest;
-			break;
-		}
-
-		// If key already exists, return.
-		if (pr->dest == del->deletions[i]) {
-			break;
-		}
-	}
-
-	return 0;
-}
-
-
-int
-proxy_paxos_change_delete_reduce_fn(void* key, void* data, void* udata)
-{
-	proxy_request* pr = (proxy_request*)data;
-	cf_node* node = (cf_node*)udata;
-
-	if (pr->dest == *node) {
-		pr->xmit_ms = 0;
-	}
-
-	return 0;
 }
 
 
@@ -1046,7 +957,7 @@ shipop_response_handler(msg* m, proxy_request* pr)
 		// Fake the ORIGINATING proxy tid.
 		msg_set_uint32(m, PROXY_FIELD_TID, rw->from_data.proxy_tid);
 		msg_incr_ref(m);
-		if (as_fabric_send(rw->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+		if (as_fabric_send(rw->from.proxy_node, m, AS_FABRIC_CHANNEL_RW) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(pr->fab_msg);
 		}

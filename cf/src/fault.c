@@ -24,6 +24,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -34,10 +35,12 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/time.h>
 
-#include <aerospike/as_log.h>
-#include <citrusleaf/alloc.h>
-#include <citrusleaf/cf_b64.h>
+#include "aerospike/as_log.h"
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_b64.h"
+#include "citrusleaf/cf_shash.h"
 
 
 /*
@@ -54,25 +57,26 @@
 /* MUST BE KEPT IN SYNC WITH FAULT.H */
 
 char *cf_fault_context_strings[] = {
-		"cf:misc",
+		"misc",
 
-		"cf:alloc",
-		"cf:arenax",
-		"cf:jem",
-		"cf:msg",
-		"cf:rbuffer",
-		"cf:socket",
-		"cf:tls",
+		"alloc",
+		"arenax",
+		"hardware",
+		"msg",
+		"rbuffer",
+		"socket",
+		"tls",
 
 		"aggr",
 		"as",
 		"batch",
 		"bin",
 		"config",
+		"clustering",
 		"compression",
 		"demarshal",
-		"drv_kv",
 		"drv_ssd",
+		"exchange",
 		"fabric",
 		"geo",
 		"hb",
@@ -89,6 +93,7 @@ char *cf_fault_context_strings[] = {
 		"particle",
 		"partition",
 		"paxos",
+		"predexp",
 		"proto",
 		"proxy",
 		"query",
@@ -99,6 +104,7 @@ char *cf_fault_context_strings[] = {
 		"sindex",
 		"smd",
 		"storage",
+		"truncate",
 		"tsvc",
 		"udf",
 		"xdr"
@@ -121,7 +127,21 @@ cf_fault_severity cf_fault_filter[CF_FAULT_CONTEXT_UNDEF];
 int cf_fault_sinks_inuse = 0;
 int num_held_fault_sinks = 0;
 
+shash *g_ticker_hash = NULL;
+#define CACHE_MSG_MAX_SIZE 128
+
+typedef struct cf_fault_cache_hkey_s {
+	// Members most likely to be unique come first:
+	int					line;
+	cf_fault_context	context;
+	const char			*file_name;
+	cf_fault_severity	severity;
+	char				msg[CACHE_MSG_MAX_SIZE];
+} cf_fault_cache_hkey;
+
 bool g_use_local_time = false;
+
+static bool g_log_millis = false;
 
 // Filter stderr logging at this level when there are no sinks:
 #define NO_SINKS_LIMIT CF_WARNING
@@ -153,6 +173,13 @@ cf_fault_set_severity(const cf_fault_context context, const cf_fault_severity se
 	}
 }
 
+static inline uint32_t
+cache_hash_fn(const void *key)
+{
+	return (uint32_t)((const cf_fault_cache_hkey*)key)->line +
+			*(uint32_t*)((const cf_fault_cache_hkey*)key)->msg;
+}
+
 /* cf_fault_init
  * This code MUST be the first thing executed by main(). */
 void
@@ -162,6 +189,12 @@ cf_fault_init()
 	for (int j = 0; j < CF_FAULT_CONTEXT_UNDEF; j++) {
 		// We start with no sinks, so let's be in-sync with that.
 		cf_fault_set_severity(j, NO_SINKS_LIMIT);
+	}
+
+	// Create the ticker hash.
+	if (shash_create(&g_ticker_hash, cache_hash_fn, sizeof(cf_fault_cache_hkey),
+			sizeof(uint32_t), 256, SHASH_CR_MT_MANYLOCK) != 0) {
+		cf_crash(CF_MISC, "failed ticker hash create");
 	}
 }
 
@@ -394,16 +427,68 @@ cf_fault_is_using_local_time()
 	return g_use_local_time;
 }
 
+void
+cf_fault_log_millis(bool log_millis)
+{
+		g_log_millis = log_millis;
+}
+
+bool
+cf_fault_is_logging_millis()
+{
+	return g_log_millis;
+}
+
+int
+cf_sprintf_now(char* mbuf, size_t limit)
+{
+	struct tm nowtm;
+
+	if (cf_fault_is_logging_millis()) {
+		// Logging milli seconds as well.
+		struct timeval curTime;
+		gettimeofday(&curTime, NULL);
+		int millis = curTime.tv_usec / 1000;
+		int pos = 0;
+		if (g_use_local_time) {
+			localtime_r(&curTime.tv_sec, &nowtm);
+			pos = strftime(mbuf, limit, "%b %d %Y %T.", &nowtm);
+			pos +=
+			  snprintf(mbuf + pos, limit - pos, "%03d", millis);
+			pos +=
+			  strftime(mbuf + pos, limit - pos, " GMT%z: ", &nowtm);
+			return pos;
+		} else {
+			gmtime_r(&curTime.tv_sec, &nowtm);
+			pos = strftime(mbuf, limit, "%b %d %Y %T.", &nowtm);
+			pos +=
+			  snprintf(mbuf + pos, limit - pos, "%03d", millis);
+			pos +=
+			  strftime(mbuf + pos, limit - pos, " %Z: ", &nowtm);
+			return pos;
+		}
+	}
+
+	// Logging only seconds.
+	time_t now = time(NULL);
+
+	if (g_use_local_time) {
+		localtime_r(&now, &nowtm);
+		return strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
+	} else {
+		gmtime_r(&now, &nowtm);
+		return strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+	}
+}
+
 /* cf_fault_event
  * Respond to a fault */
 void
 cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
-		const char *file_name, const int line, char *msg, ...)
+		const char *file_name, const int line, const char *msg, ...)
 {
 	va_list argp;
 	char mbuf[1024];
-	time_t now;
-	struct tm nowtm;
 	size_t pos;
 
 
@@ -411,16 +496,7 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 	size_t limit = sizeof(mbuf) - 2;
 
 	/* Set the timestamp */
-	now = time(NULL);
-
-	if (g_use_local_time) {
-		localtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
-	}
-	else {
-		gmtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
-	}
+	pos = cf_sprintf_now(mbuf, limit);
 
 	/* Set the context/scope/severity tag */
 	pos += snprintf(mbuf + pos, limit - pos, "%s (%s): ", severity_tag(severity), cf_fault_context_strings[context]);
@@ -488,7 +564,7 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
  * used in other contexts as a hex number).
  */
 int
-generate_packed_hex_string(void *mem_ptr, uint len, char* output)
+generate_packed_hex_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
@@ -497,7 +573,7 @@ generate_packed_hex_string(void *mem_ptr, uint len, char* output)
 	*p++ = '0';
 	*p++ = 'x';
 
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		sprintf(p, "%02x", d[i]);
 		p += 2;
 	}
@@ -511,13 +587,13 @@ generate_packed_hex_string(void *mem_ptr, uint len, char* output)
  * e.g. fc 86 e8 3a 6d 6d 30 24 65 9e 6f e4 8c 35 1a aa f6 e9 64 a5
  */
 int
-generate_spaced_hex_string(void *mem_ptr, uint len, char* output)
+generate_spaced_hex_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
 	char* startp = p; // Remember where we started.
 
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		sprintf(p, "%02x ", d[i]); // Notice the space after the 02x.
 		p += 3;
 	}
@@ -534,11 +610,11 @@ generate_spaced_hex_string(void *mem_ptr, uint len, char* output)
  * f6e9 64a5
  */
 int
-generate_column_hex_string(void *mem_ptr, uint len, char* output)
+generate_column_hex_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
-	int i;
+	uint32_t i;
 	char* startp = p; // Remember where we started.
 
 	*p++ = '\n'; // Start out on a new line
@@ -568,7 +644,7 @@ generate_column_hex_string(void *mem_ptr, uint len, char* output)
  * Base 64 Chars:     T(19)      W(22)      F(5)      u(46)
  * and so this string is converted into the Base 64 string: "TWFu"
  */
-int generate_base64_string(void *mem_ptr, uint len, char output_buf[])
+int generate_base64_string(void *mem_ptr, uint32_t len, char output_buf[])
 {
 	uint32_t encoded_len = cf_b64_encoded_len(len);
 	// TODO - check that output_buf is big enough, and/or truncate.
@@ -586,7 +662,7 @@ int generate_base64_string(void *mem_ptr, uint len, char output_buf[])
  * Print the bits left to right (big to small).
  * This is assuming BIG ENDIAN representation (most significant bit is left).
  */
-int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
+int generate_4spaced_bits_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
@@ -595,7 +671,7 @@ int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
 	char* startp = p; // Remember where we started.
 
 	// For each byte in the string
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		uint_val = d[i];
 		for (int j = 0; j < 8; j++) {
 			sprintf(p, "%1d", ((uint_val << j) & mask));
@@ -613,7 +689,7 @@ int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
  * four bit groups.  Columns will be 8 columns of 4 bits.
  * (1 32 bit word per row)
  */
-int generate_column_bits_string(void *mem_ptr, uint len, char* output)
+int generate_column_bits_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
@@ -625,7 +701,7 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
 	*p++ = '\n';
 
 	// For each byte in the string
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		uint_val = d[i];
 		for (int j = 0; j < 8; j++) {
 			sprintf(p, "%1d", ((uint_val << j) & mask));
@@ -660,12 +736,10 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
 void
 cf_fault_event2(const cf_fault_context context,
 		const cf_fault_severity severity, const char *file_name, const int line,
-		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...)
+		void * mem_ptr, size_t len, cf_display_type dt, const char *msg, ...)
 {
 	va_list argp;
 	char mbuf[MAX_BINARY_BUF_SZ];
-	time_t now;
-	struct tm nowtm;
 	size_t pos;
 
 	char binary_buf[MAX_BINARY_BUF_SZ];
@@ -680,16 +754,7 @@ cf_fault_event2(const cf_fault_context context,
 	size_t limit = sizeof(mbuf) - 2;
 
 	/* Set the timestamp */
-	now = time(NULL);
-
-	if (g_use_local_time) {
-		localtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
-	}
-	else {
-		gmtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
-	}
+	pos = cf_sprintf_now(mbuf, limit);
 
 	// If we're given a valid MEMORY POINTER for a binary value, then
 	// compute the string that corresponds to the bytes.
@@ -807,7 +872,7 @@ cf_fault_event2(const cf_fault_context context,
 void
 cf_fault_event_nostack(const cf_fault_context context,
 		const cf_fault_severity severity, const char *fn, const int line,
-		char *msg, ...)
+		const char *msg, ...)
 {
 	va_list argp;
 	char mbuf[1024];
@@ -937,7 +1002,7 @@ cf_fault_sink_context_all_strlist(int sink_id, cf_dyn_buf *db)
 	if (sink_id > cf_fault_sinks_inuse)	return(-1);
 	cf_fault_sink *s = &cf_fault_sinks[sink_id];
 
-	for (uint i=0; i<CF_FAULT_CONTEXT_UNDEF; i++) {
+	for (int i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
 		cf_dyn_buf_append_string(db, cf_fault_context_strings[i]);
 		cf_dyn_buf_append_char(db, ':');
 		cf_dyn_buf_append_string(db, cf_fault_severity_strings[s->limit[i]]);
@@ -955,8 +1020,8 @@ cf_fault_sink_context_strlist(int sink_id, char *context, cf_dyn_buf *db)
 	cf_fault_sink *s = &cf_fault_sinks[sink_id];
 
 	// get the severity
-	uint i;
-	for (i=0;i<CF_FAULT_CONTEXT_UNDEF;i++) {
+	int i;
+	for (i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
 		if (0 == strcmp(cf_fault_context_strings[i],context))
 			break;
 	}
@@ -971,4 +1036,78 @@ cf_fault_sink_context_strlist(int sink_id, char *context, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ':');
 	cf_dyn_buf_append_string(db, cf_fault_severity_strings[s->limit[i]]);
 	return(0);
+}
+
+
+static int
+cf_fault_cache_reduce_fn(const void *key, void *data, void *udata)
+{
+	uint32_t *count = (uint32_t*)data;
+
+	if (*count == 0) {
+		return SHASH_REDUCE_DELETE;
+	}
+
+	const cf_fault_cache_hkey *hkey = (const cf_fault_cache_hkey*)key;
+
+	cf_fault_event(hkey->context, hkey->severity, hkey->file_name, hkey->line,
+			"(repeated:%u) %s", *count, hkey->msg);
+
+	*count = 0;
+
+	return SHASH_OK;
+}
+
+
+// For now there's only one cache, dumped by the ticker.
+void
+cf_fault_dump_cache()
+{
+	shash_reduce_delete(g_ticker_hash, cf_fault_cache_reduce_fn, NULL);
+}
+
+
+// For now there's only one cache, dumped by the ticker.
+void
+cf_fault_cache_event(cf_fault_context context, cf_fault_severity severity,
+		const char *file_name, int line, char *msg, ...)
+{
+	cf_fault_cache_hkey key = {
+			.line = line,
+			.context = context,
+			.file_name = file_name,
+			.severity = severity,
+			.msg = { 0 } // must pad hash keys
+	};
+
+	size_t limit = sizeof(key.msg) - 1; // truncate leaving null-terminator
+
+	va_list argp;
+
+	va_start(argp, msg);
+	vsnprintf(key.msg, limit, msg, argp);
+	va_end(argp);
+
+	while (true) {
+		uint32_t *valp = NULL;
+		pthread_mutex_t *lockp = NULL;
+
+		if (shash_get_vlock(g_ticker_hash, &key, (void**)&valp, &lockp) ==
+				SHASH_OK) {
+			// Already in hash - increment count and don't log it.
+			(*valp)++;
+			pthread_mutex_unlock(lockp);
+			break;
+		}
+		// else - not found, add it to hash and log it.
+
+		uint32_t initv = 1;
+
+		if (shash_put_unique(g_ticker_hash, &key, &initv) == SHASH_ERR_FOUND) {
+			continue; // other thread beat us to it - loop around and get it
+		}
+
+		cf_fault_event(context, severity, file_name, line, "%s", key.msg);
+		break;
+	}
 }

@@ -86,7 +86,7 @@ udf_storage_record_open(udf_record *urecord)
 	as_index       *r	  = urecord->r_ref->r;
 	as_transaction *tr    = urecord->tr;
 
-	as_storage_record_open(tr->rsv.ns, r, rd, &r->key);
+	as_storage_record_open(tr->rsv.ns, r, rd);
 
 	// Deal with delete durability (enterprise only).
 	if ((urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES) != 0 &&
@@ -170,7 +170,7 @@ udf_storage_record_close(udf_record *urecord)
 
 		if (! is_subrec) {
 			if (as_ldt_record_is_parent(rd->r)) {
-				cf_detail_digest(AS_LDT, &rd->keyd, "LDT_INDEXBIT Parent @ write: Digest:");
+				cf_detail_digest(AS_LDT, &rd->r->keyd, "LDT_INDEXBIT Parent @ write: Digest:");
 			}
 		} else if (has_bins) {
 			as_ldt_subrec_storage_validate(rd, "Writing");
@@ -230,22 +230,22 @@ udf_record_open(udf_record * urecord)
 	as_transaction *tr    = urecord->tr;
 	as_index_ref   *r_ref = urecord->r_ref;
 	as_index_tree  *tree  = tr->rsv.tree;
+	bool is_subrec = (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) != 0;
 
-	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) {
+	if (is_subrec) {
 		tree = tr->rsv.sub_tree;
 	}
 
 	int rec_rv = 0;
 	if (!(urecord->flag & UDF_RECORD_FLAG_OPEN)) {
-		cf_detail(AS_UDF, "Opening %sRecord ",
-				  (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "Sub" : "");
-		rec_rv = as_record_get(tree, &tr->keyd, r_ref, tr->rsv.ns);
+		cf_detail(AS_UDF, "Opening %sRecord ", is_subrec ? "Sub" : "");
+		rec_rv = as_record_get_live(tree, &tr->keyd, r_ref, tr->rsv.ns);
 	}
 
 	if (!rec_rv) {
 		as_index *r = r_ref->r;
 		// check to see this isn't an expired record waiting to die
-		if (as_record_is_expired(r)) {
+		if (! is_subrec && as_record_is_doomed(r, tr->rsv.ns)) {
 			as_record_done(r_ref, tr->rsv.ns);
 			cf_detail(AS_UDF, "udf_record_open: Record has expired cannot read");
 			rec_rv = -2;
@@ -257,7 +257,7 @@ udf_record_open(udf_record * urecord)
 		}
 	} else {
 		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: %s rec_get returned with %d", 
-				(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "sub" : "", rec_rv);
+				is_subrec ? "sub" : "", rec_rv);
 	}
 	return rec_rv;
 }
@@ -834,7 +834,7 @@ udf_record_set_type(const as_rec * rec,  int8_t ldt_rectype_bit_update)
 
 	urecord->ldt_rectype_bit_update = ldt_rectype_bit_update;
 	cf_detail(AS_RW, "TO URECORD FROM LUA   Digest=%"PRIx64" bits %d",
-			  *(uint64_t *)&urecord->rd->keyd.digest[8], urecord->ldt_rectype_bit_update);
+			  *(uint64_t *)&urecord->rd->r->keyd.digest[8], urecord->ldt_rectype_bit_update);
 
 	urecord->flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
 

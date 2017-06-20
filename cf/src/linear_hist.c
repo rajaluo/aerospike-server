@@ -53,7 +53,7 @@ struct linear_hist_s {
 	char info_snapshot[INFO_SNAPSHOT_SIZE];
 
 	uint32_t num_buckets;
-	uint32_t *counts;
+	uint64_t *counts;
 
 	uint32_t start;
 	uint32_t bucket_width;
@@ -100,7 +100,7 @@ linear_hist_create(const char *name, uint32_t start, uint32_t max_offset,
 
 	h->num_buckets = num_buckets;
 
-	if (! (h->counts = cf_malloc(sizeof(uint32_t) * num_buckets))) {
+	if (! (h->counts = cf_malloc(sizeof(uint64_t) * num_buckets))) {
 		cf_crash(AS_INFO, "linear_hist_create - alloc counts failed");
 	}
 
@@ -131,7 +131,7 @@ linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset,
 		return;
 	}
 
-	uint32_t *counts = cf_realloc(h->counts, sizeof(uint32_t) * num_buckets);
+	uint64_t *counts = cf_realloc(h->counts, sizeof(uint64_t) * num_buckets);
 
 	if (! counts) {
 		cf_warning(AS_INFO, "failed linear_hist_reset - realloc failed");
@@ -158,16 +158,16 @@ linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset)
 		h->bucket_width = 1;
 	}
 
-	memset((void *)h->counts, 0, sizeof(uint32_t) * h->num_buckets);
+	memset((void *)h->counts, 0, sizeof(uint64_t) * h->num_buckets);
 }
 
 //------------------------------------------------
 // Access method for total count.
 //
-uint32_t
+uint64_t
 linear_hist_get_total(linear_hist *h)
 {
-	uint32_t total_count = 0;
+	uint64_t total_count = 0;
 
 	for (uint32_t i = 0; i < h->num_buckets; i++) {
 		total_count += h->counts[i];
@@ -219,7 +219,7 @@ linear_hist_insert_data_point(linear_hist *h, uint32_t point)
 // total count is exceeded (accumulating from low
 // bucket).
 //
-uint32_t
+uint64_t
 linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
 		linear_hist_threshold *p_threshold)
 {
@@ -234,14 +234,14 @@ linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
 // count is exceeded (accumulating from low
 // bucket).
 //
-uint32_t
-linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal,
+uint64_t
+linear_hist_get_threshold_for_subtotal(linear_hist *h, uint64_t subtotal,
 		linear_hist_threshold *p_threshold)
 {
 	p_threshold->bucket_width = h->bucket_width;
 	p_threshold->target_count = subtotal;
 
-	uint32_t count = 0;
+	uint64_t count = 0;
 	uint32_t i;
 
 	for (i = 0; i < h->num_buckets; i++) {
@@ -281,7 +281,7 @@ linear_hist_dump(linear_hist *h)
 	uint32_t i = h->num_buckets;
 	uint32_t j = 0;
 	uint32_t k = 0;
-	uint32_t total_count = 0;
+	uint64_t total_count = 0;
 
 	for (uint32_t b = 0; b < h->num_buckets; b++) {
 		if (h->counts[b] != 0) {
@@ -301,7 +301,7 @@ linear_hist_dump(linear_hist *h)
 
 	buf[0] = '\0';
 
-	cf_debug(AS_NSUP, "linear histogram dump: %s [%u %u]/[%u] (%u total)",
+	cf_debug(AS_NSUP, "linear histogram dump: %s [%u %u]/[%u] (%lu total)",
 			h->name, h->start, h->start + (h->num_buckets * h->bucket_width),
 			h->bucket_width, total_count);
 
@@ -316,7 +316,7 @@ linear_hist_dump(linear_hist *h)
 			continue;
 		}
 
-		int bytes = sprintf(buf + pos, " (%02u: %010u)", i, h->counts[i]);
+		int bytes = sprintf(buf + pos, " (%02u: %010lu)", i, h->counts[i]);
 
 		if (bytes <= 0) {
 			cf_debug(AS_NSUP, "linear histogram dump error");
@@ -357,12 +357,12 @@ linear_hist_save_info(linear_hist *h)
 
 	// Write num_buckets, the bucket width, and the first bucket's count.
 	int i = 0;
-	int pos = snprintf(h->info_snapshot, INFO_SNAPSHOT_SIZE, "%u,%u,%u",
+	int pos = snprintf(h->info_snapshot, INFO_SNAPSHOT_SIZE, "%u,%u,%lu",
 			h->num_buckets, h->bucket_width, h->counts[i++]);
 
 	while (pos < INFO_SNAPSHOT_SIZE && i < h->num_buckets) {
 		pos += snprintf(h->info_snapshot + pos, INFO_SNAPSHOT_SIZE - pos,
-				",%u", h->counts[i++]);
+				",%lu", h->counts[i++]);
 	}
 
 	pthread_mutex_unlock(&h->info_lock);

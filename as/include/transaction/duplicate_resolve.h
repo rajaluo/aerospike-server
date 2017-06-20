@@ -27,7 +27,7 @@
 //
 
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/transaction.h"
 #include "transaction/rw_request.h"

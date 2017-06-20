@@ -63,7 +63,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 	else {
-		if (tr->rsv.ns->ns_allow_nonxdr_writes) {
+		if (tr->rsv.ns->ns_allow_nonxdr_writes || tr->origin == FROM_NSUP) {
 			return true;
 		}
 	}
@@ -85,7 +85,7 @@ send_rw_messages(rw_request* rw)
 		msg_incr_ref(rw->dest_msg);
 
 		int rv = as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
-				AS_FABRIC_PRIORITY_MEDIUM);
+				AS_FABRIC_CHANNEL_RW);
 
 		if (rv != AS_FABRIC_SUCCESS) {
 			if (rv != AS_FABRIC_ERR_NO_NODE) {
@@ -278,26 +278,54 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 }
 
 
+// If called for data-not-in-memory, this may read record from drive!
+// TODO - rename as as_record_... and move to record.c?
+void
+record_delete_adjust_sindex(as_record* r, as_namespace* ns)
+{
+	if (! record_has_sindex(r, ns)) {
+		return;
+	}
+
+	as_storage_rd rd;
+
+	as_storage_record_open(ns, r, &rd);
+	as_storage_rd_load_n_bins(&rd);
+
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
+
+	as_storage_rd_load_bins(&rd, stack_bins);
+
+	remove_from_sindex(ns, as_index_get_set_name(r, ns), &r->keyd, rd.bins,
+			rd.n_bins);
+
+	as_storage_record_close(&rd);
+}
+
+
 // Remove record from secondary index. Called only for data-in-memory. If
 // data-not-in-memory, existing record is not read, and secondary index entry is
 // cleaned up by background sindex defrag thread.
+// TODO - rename as as_record_... and move to record.c?
 void
 delete_adjust_sindex(as_storage_rd* rd)
 {
 	as_namespace* ns = rd->ns;
 
-	if (! as_sindex_ns_has_sindex(ns)) {
+	if (! record_has_sindex(rd->r, ns)) {
 		return;
 	}
 
 	as_storage_rd_load_n_bins(rd);
 	as_storage_rd_load_bins(rd, NULL);
 
-	remove_from_sindex(ns, as_index_get_set_name(rd->r, ns), &rd->keyd,
+	remove_from_sindex(ns, as_index_get_set_name(rd->r, ns), &rd->r->keyd,
 			rd->bins, rd->n_bins);
 }
 
 
+// TODO - rename as as_record_..., move to record.c, take r instead of set_name,
+// and lose keyd parameter?
 void
 remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 		as_bin* bins, uint32_t n_bins)
@@ -321,7 +349,7 @@ remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 				&sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 
 	if (sbins_populated) {
 		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, keyd);

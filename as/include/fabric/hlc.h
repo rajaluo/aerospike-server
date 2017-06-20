@@ -33,7 +33,7 @@
 
 #include "citrusleaf/cf_clock.h"
 
-#include "util.h"
+#include "node.h"
 
 /**
  * A hybrid logical clock timestamp.

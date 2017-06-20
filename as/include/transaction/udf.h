@@ -29,7 +29,9 @@
 #include <stdint.h>
 
 #include "aerospike/as_aerospike.h"
+#include "aerospike/as_list.h"
 
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 
@@ -42,25 +44,8 @@ typedef enum {
 	UDF_OPTYPE_NONE,
 	UDF_OPTYPE_READ,
 	UDF_OPTYPE_WRITE,
-	UDF_OPTYPE_DELETE,
-	UDF_OPTYPE_LDT_READ,
-	UDF_OPTYPE_LDT_WRITE,
-	UDF_OPTYPE_LDT_DELETE
+	UDF_OPTYPE_DELETE
 } udf_optype;
-
-#define UDF_OP_IS_DELETE(op) \
-	(((op) == UDF_OPTYPE_DELETE) || ((op) == UDF_OPTYPE_LDT_DELETE))
-
-#define UDF_OP_IS_READ(op) \
-	(((op) == UDF_OPTYPE_READ) || ((op) == UDF_OPTYPE_LDT_READ))
-
-#define UDF_OP_IS_WRITE(op) \
-	(((op) == UDF_OPTYPE_WRITE) || ((op) == UDF_OPTYPE_LDT_WRITE))
-
-#define UDF_OP_IS_LDT(op) \
-	(((op) == UDF_OPTYPE_LDT_READ) || \
-			((op) == UDF_OPTYPE_LDT_WRITE) || \
-			((op) == UDF_OPTYPE_LDT_DELETE))
 
 #define UDF_MAX_STRING_SZ 128
 
@@ -74,15 +59,28 @@ typedef struct udf_def_s {
 typedef int (*iudf_cb)(void* udata, int retcode);
 
 typedef struct iudf_origin_s {
-	udf_def	def;
-	iudf_cb	cb;
-	void*	udata;
+	udf_def			def;
+	predexp_eval_t*	predexp;
+	iudf_cb			cb;
+	void*			udata;
 } iudf_origin;
 
 
 //==========================================================
 // Public API.
 //
+
+static inline void
+iudf_origin_destroy(iudf_origin* origin)
+{
+	if (origin->def.arglist) {
+		as_list_destroy(origin->def.arglist);
+	}
+
+	if (origin->predexp) {
+		predexp_destroy(origin->predexp);
+	}
+}
 
 void as_udf_init();
 udf_def* udf_def_init_from_msg(udf_def* def, const as_transaction* tr);

@@ -343,6 +343,11 @@ as_udf_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
+		// LDT multi-ops don't generate pickle if replication is not needed.
+		if (rw->pickled_buf) {
+			clear_delete_response_metadata(rw, tr);
+		}
+
 		send_udf_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
@@ -418,7 +423,7 @@ start_udf_repl_write(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-write message.
 
-	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+	if (! repl_write_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -466,6 +471,11 @@ udf_dup_res_cb(rw_request* rw)
 
 	// If we don't need replica writes, transaction is finished.
 	if (rw->n_dest_nodes == 0) {
+		// LDT multi-ops don't generate pickle if replication is not needed.
+		if (rw->pickled_buf) {
+			clear_delete_response_metadata(rw, &tr);
+		}
+
 		send_udf_response(&tr, &rw->response_db);
 		return true;
 	}
@@ -487,7 +497,7 @@ udf_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	// Recycle rw_request that was just used for duplicate resolution to now do
 	// replica writes. Note - we are under the rw_request lock here!
 
-	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+	if (! repl_write_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -641,19 +651,9 @@ udf_master(rw_request* rw, as_transaction* tr)
 		as_list_destroy(call.def->arglist);
 	}
 
-	if (UDF_OP_IS_READ(optype) || optype == UDF_OPTYPE_NONE) {
+	if (optype == UDF_OPTYPE_READ || optype == UDF_OPTYPE_NONE) {
 		// UDF is done, no replica writes needed.
 		return TRANS_DONE_SUCCESS;
-	}
-
-	if (UDF_OP_IS_LDT(optype)) {
-		rw->is_multiop = true;
-	}
-
-	// UDFs send original msg for replica deletes.
-	// Note - not currently necessary to set this message flag.
-	if (UDF_OP_IS_DELETE(optype)) {
-		tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
 	}
 
 	return TRANS_IN_PROGRESS;
@@ -699,10 +699,10 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	// Find record in index.
 
-	int get_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns);
+	int get_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref);
 
-	if (get_rv == 0 && as_record_is_expired(r_ref.r)) {
-		// If record is expired, pretend it was not found.
+	if (get_rv == 0 && as_record_is_doomed(r_ref.r, ns)) {
+		// If record is expired or truncated, pretend it was not found.
 		as_record_done(&r_ref, ns);
 		get_rv = -1;
 	}
@@ -730,6 +730,21 @@ udf_master_apply(udf_call* call, rw_request* rw)
 			process_failure(call, NULL, &rw->response_db);
 			ldt_record_destroy(&lrecord);
 			return UDF_OPTYPE_NONE;
+		}
+
+		if (tr->origin == FROM_IUDF && tr->from.iudf_orig->predexp) {
+			predexp_args_t predargs = {
+					.ns = ns, .md = r_ref.r, .vl = NULL, .rd = &rd
+			};
+
+			if (! predexp_matches_record(tr->from.iudf_orig->predexp,
+					&predargs)) {
+				udf_record_close(&urecord);
+				tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND; // not ideal
+				process_failure(call, NULL, &rw->response_db);
+				ldt_record_destroy(&lrecord);
+				return UDF_OPTYPE_NONE;
+			}
 		}
 
 		as_msg* m = &tr->msgp->msg;
@@ -894,7 +909,6 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 	*lrecord_op = UDF_OPTYPE_READ;
 
 	int ret = 0;
-	bool is_ldt = false;
 	int subrec_count = 0;
 
 	udf_record* h_urecord = as_rec_source(lrecord->h_urec);
@@ -920,8 +934,8 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 			udf_record* c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 			udf_optype c_urecord_op = udf_finish_op(c_urecord);
 
-			if (UDF_OP_IS_WRITE(c_urecord_op)) {
-				is_ldt = true;
+			if (c_urecord_op == UDF_OPTYPE_WRITE) {
+				rw->is_multiop = true;
 				subrec_count++;
 			}
 
@@ -932,7 +946,7 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 		// held until the end.
 		udf_post_processing(h_urecord, h_urecord_op, set_id);
 
-		if (is_ldt) {
+		if (rw->is_multiop) {
 			// Create the multiop pickled buf.
 			ret = as_ldt_record_pickle(lrecord, &rw->pickled_buf,
 					&rw->pickled_sz);
@@ -957,22 +971,10 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 		}
 	}
 
-	if (UDF_OP_IS_WRITE(*lrecord_op) &&
+	if (*lrecord_op == UDF_OPTYPE_WRITE &&
 			(lrecord->udf_context & UDF_CONTEXT_LDT) != 0) {
 		histogram_insert_raw(g_stats.ldt_update_record_cnt_hist,
 				subrec_count + 1);
-	}
-
-	if (is_ldt) {
-		if (UDF_OP_IS_WRITE(*lrecord_op)) {
-			*lrecord_op = UDF_OPTYPE_LDT_WRITE;
-		}
-		else if (UDF_OP_IS_DELETE(*lrecord_op)) {
-			*lrecord_op = UDF_OPTYPE_LDT_DELETE;
-		}
-		else if (UDF_OP_IS_READ(*lrecord_op)) {
-			*lrecord_op = UDF_OPTYPE_LDT_READ;
-		}
 	}
 
 	return ret;
@@ -1011,10 +1013,6 @@ udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 	urecord->pickled_sz = 0;
 	as_rec_props_clear(&urecord->pickled_rec_props);
 	bool udf_xdr_ship_op = false;
-
-	if (UDF_OP_IS_DELETE(urecord_op) || UDF_OP_IS_WRITE(urecord_op)) {
-		udf_xdr_ship_op = true;
-	}
 
 	if (urecord_op == UDF_OPTYPE_WRITE || urecord_op == UDF_OPTYPE_DELETE) {
 		size_t rec_props_data_size = as_storage_record_rec_props_size(rd);
@@ -1055,6 +1053,7 @@ udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 		}
 
 		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
+		udf_xdr_ship_op = true;
 	}
 
 	// Collect information for XDR before closing the record.
@@ -1071,7 +1070,7 @@ udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 	xdr_dirty_bins dirty_bins;
 	xdr_clear_dirty_bins(&dirty_bins);
 
-	if (urecord->dirty && udf_xdr_ship_op && UDF_OP_IS_WRITE(urecord_op)) {
+	if (urecord->dirty && udf_xdr_ship_op && urecord_op == UDF_OPTYPE_WRITE) {
 		xdr_copy_dirty_bins(urecord->dirty, &dirty_bins);
 	}
 
@@ -1080,11 +1079,11 @@ udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 
 	// Write to XDR pipe.
 	if (udf_xdr_ship_op) {
-		if (UDF_OP_IS_WRITE(urecord_op)) {
+		if (urecord_op == UDF_OPTYPE_WRITE) {
 			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, XDR_OP_TYPE_WRITE,
 					set_id, &dirty_bins);
 		}
-		else if (UDF_OP_IS_DELETE(urecord_op)) {
+		else if (urecord_op == UDF_OPTYPE_DELETE) {
 			xdr_write(tr->rsv.ns, tr->keyd, 0, 0,
 					as_transaction_is_durable_delete(tr) ?
 							XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP,
@@ -1152,25 +1151,25 @@ udf_pickle_all(as_storage_rd* rd, pickle_info* pickle)
 void
 update_ldt_stats(as_namespace* ns, udf_optype op, int ret, bool is_success)
 {
-	if (UDF_OP_IS_READ(op)) {
+	if (op == UDF_OPTYPE_READ) {
 		cf_atomic_int_incr(&ns->lstats.ldt_read_reqs);
 	}
-	else if (UDF_OP_IS_DELETE(op)) {
+	else if (op == UDF_OPTYPE_DELETE) {
 		cf_atomic_int_incr(&ns->lstats.ldt_delete_reqs);
 	}
-	else if (UDF_OP_IS_WRITE (op)) {
+	else if (op == UDF_OPTYPE_WRITE) {
 		cf_atomic_int_incr(&ns->lstats.ldt_write_reqs);
 	}
 
 	if (ret == 0) {
 		if (is_success) {
-			if (UDF_OP_IS_READ(op)) {
+			if (op == UDF_OPTYPE_READ) {
 				cf_atomic_int_incr(&ns->lstats.ldt_read_success);
 			}
-			else if (UDF_OP_IS_DELETE(op)) {
+			else if (op == UDF_OPTYPE_DELETE) {
 				cf_atomic_int_incr(&ns->lstats.ldt_delete_success);
 			}
-			else if (UDF_OP_IS_WRITE (op)) {
+			else if (op == UDF_OPTYPE_WRITE) {
 				cf_atomic_int_incr(&ns->lstats.ldt_write_success);
 			}
 		}
@@ -1191,13 +1190,13 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 	switch (origin) {
 	case FROM_CLIENT:
 		if (ret == 0 && is_success) {
-			if (UDF_OP_IS_READ(op)) {
+			if (op == UDF_OPTYPE_READ) {
 				cf_atomic_int_incr(&ns->n_client_lang_read_success);
 			}
-			else if (UDF_OP_IS_DELETE(op)) {
+			else if (op == UDF_OPTYPE_DELETE) {
 				cf_atomic_int_incr(&ns->n_client_lang_delete_success);
 			}
-			else if (UDF_OP_IS_WRITE (op)) {
+			else if (op == UDF_OPTYPE_WRITE) {
 				cf_atomic_int_incr(&ns->n_client_lang_write_success);
 			}
 		}
@@ -1211,15 +1210,15 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 		break;
 	case FROM_IUDF:
 		if (ret == 0 && is_success) {
-			if (UDF_OP_IS_READ(op)) {
+			if (op == UDF_OPTYPE_READ) {
 				// Note - this would be weird, since there's nowhere for a
 				// response to go in our current UDF scans & queries.
 				cf_atomic_int_incr(&ns->n_udf_sub_lang_read_success);
 			}
-			else if (UDF_OP_IS_DELETE(op)) {
+			else if (op == UDF_OPTYPE_DELETE) {
 				cf_atomic_int_incr(&ns->n_udf_sub_lang_delete_success);
 			}
-			else if (UDF_OP_IS_WRITE (op)) {
+			else if (op == UDF_OPTYPE_WRITE) {
 				cf_atomic_int_incr(&ns->n_udf_sub_lang_write_success);
 			}
 		}

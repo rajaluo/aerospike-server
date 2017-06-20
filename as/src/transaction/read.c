@@ -305,27 +305,22 @@ read_local(as_transaction* tr)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) != 0) {
+	if (as_record_get_live(tr->rsv.tree, &tr->keyd, &r_ref, ns) != 0) {
 		read_local_done(tr, NULL, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return TRANS_DONE_ERROR;
 	}
 
 	as_record* r = r_ref.r;
 
-	if (! as_record_is_live(r)) {
-		read_local_done(tr, &r_ref, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
-		return TRANS_DONE_ERROR;
-	}
-
-	// Check if it's an expired record.
-	if (as_record_is_expired(r)) {
+	// Check if it's an expired or truncated record.
+	if (as_record_is_doomed(r, ns)) {
 		read_local_done(tr, &r_ref, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return TRANS_DONE_ERROR;
 	}
 
 	as_storage_rd rd;
 
-	as_storage_record_open(ns, r, &rd, &tr->keyd);
+	as_storage_record_open(ns, r, &rd);
 
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!

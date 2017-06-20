@@ -41,7 +41,8 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
-#include "util.h"
+#include "hardware.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -92,9 +93,6 @@ static uint32_t g_queues_n_threads[MAX_TRANSACTION_QUEUES] = { 0 };
 // be cache friendly.
 static uint32_t g_current_q = 0;
 
-// TODO - consider how to unify usage of one configuration setting lock.
-static pthread_mutex_t g_tsvc_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
-
 
 //==========================================================
 // Public API.
@@ -103,7 +101,7 @@ static pthread_mutex_t g_tsvc_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
 void
 as_tsvc_init()
 {
-	cf_info(AS_TSVC, "shared queues: %u queues with %u threads each",
+	cf_info(AS_TSVC, "%u transaction queues: starting %u threads per queue",
 			g_config.n_transaction_queues,
 			g_config.n_transaction_threads_per_queue);
 
@@ -126,8 +124,18 @@ as_tsvc_init()
 void
 as_tsvc_enqueue(as_transaction *tr)
 {
-	// Transaction can go on any queue - distribute evenly.
-	uint32_t qid = (g_current_q++) % g_config.n_transaction_queues;
+	uint32_t qid;
+
+	if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ||
+			g_config.n_namespaces_not_in_memory == 0) {
+		cf_debug(AS_TSVC, "no CPU pinning - dispatching transaction round-robin");
+		// Transaction can go on any queue - distribute evenly.
+		qid = (g_current_q++) % g_config.n_transaction_queues;
+	}
+	else {
+		qid = cf_topo_current_cpu();
+		cf_debug(AS_TSVC, "transaction on CPU %u", qid);
+	}
 
 	if (cf_queue_push(g_transaction_queues[qid], tr) != CF_QUEUE_OK) {
 		cf_crash(AS_TSVC, "transaction queue push failed - out of memory?");
@@ -139,8 +147,6 @@ as_tsvc_enqueue(as_transaction *tr)
 void
 as_tsvc_set_threads_per_queue(uint32_t target_n_threads)
 {
-	pthread_mutex_lock(&g_tsvc_cfg_lock);
-
 	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
 		uint32_t current_n_threads = g_queues_n_threads[qid];
 
@@ -153,8 +159,6 @@ as_tsvc_set_threads_per_queue(uint32_t target_n_threads)
 	}
 
 	g_config.n_transaction_threads_per_queue = target_n_threads;
-
-	pthread_mutex_unlock(&g_tsvc_cfg_lock);
 }
 
 
@@ -177,7 +181,7 @@ void
 as_tsvc_process_transaction(as_transaction *tr)
 {
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
-		as_xdr_handle_txn(tr);
+		as_xdr_read_txn(tr);
 		return;
 	}
 
@@ -211,12 +215,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 	as_namespace *ns = as_namespace_get_bymsgfield(nf);
 
 	if (! ns) {
-		char ns_name[AS_ID_NAMESPACE_SZ];
 		uint32_t ns_sz = as_msg_field_get_value_sz(nf);
-		uint32_t len = ns_sz < sizeof(ns_name) ? ns_sz : sizeof(ns_name) - 1;
-
-		memcpy(ns_name, nf->data, len);
-		ns_name[len] = 0;
+		CF_ZSTR_DEFINE(ns_name, AS_ID_NAMESPACE_SZ, nf->data, ns_sz);
 
 		cf_warning(AS_TSVC, "unknown namespace %s (%u) in protocol request - check configuration file",
 				ns_name, ns_sz);
@@ -225,11 +225,10 @@ as_tsvc_process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
-	JEM_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA(ns);
 
 	// Have we finished the very first partition balance?
-	if (! as_partition_balance_is_init_resolved() &&
-			! as_transaction_is_nsup_delete(tr)) {
+	if (! as_partition_balance_is_init_resolved()) {
 		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
 		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		// Note that we forfeited namespace info above so scan & query don't get
@@ -354,7 +353,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	// write reservation, replica writes, etc. Writes quickly get split into
 	// write, delete, or UDF after the reservation.
 
-	uint32_t pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(&tr->keyd);
 	cf_node dest;
 	uint64_t partition_cluster_key = 0;
 
@@ -410,6 +409,12 @@ as_tsvc_process_transaction(as_transaction *tr)
 	else {
 		cf_warning(AS_TSVC, "transaction is neither read nor write - unexpected");
 		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_PARAMETER);
+		goto Cleanup;
+	}
+
+	if (rv == -2) {
+		// Partition is frozen.
+		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		goto Cleanup;
 	}
 
@@ -515,7 +520,7 @@ tsvc_add_threads(uint32_t qid, uint32_t n_threads)
 
 	for (uint32_t n = 0; n < n_threads; n++) {
 		if (pthread_create(&thread, &attrs, run_tsvc,
-				(void*)g_transaction_queues[qid]) == 0) {
+				(void*)(uint64_t)qid) == 0) {
 			g_queues_n_threads[qid]++;
 		}
 		else {
@@ -547,7 +552,15 @@ tsvc_remove_threads(uint32_t qid, uint32_t n_threads)
 void *
 run_tsvc(void *arg)
 {
-	cf_queue *q = (cf_queue *)arg;
+	uint32_t qid = (uint32_t)(uint64_t)arg;
+
+	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE &&
+			g_config.n_namespaces_not_in_memory != 0) {
+		cf_detail(AS_TSVC, "pinning thread to CPU %u", qid);
+		cf_topo_pin_to_cpu((cf_topo_cpu_index)qid);
+	}
+
+	cf_queue *q = g_transaction_queues[qid];
 
 	while (true) {
 		as_transaction tr;
@@ -559,6 +572,8 @@ run_tsvc(void *arg)
 		if (! tr.msgp) {
 			break; // thread termination via configuration change
 		}
+
+		cf_debug(AS_TSVC, "running on CPU %hu", cf_topo_current_cpu());
 
 		if (g_config.svc_benchmarks_enabled &&
 				tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {

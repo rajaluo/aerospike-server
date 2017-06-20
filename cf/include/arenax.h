@@ -44,8 +44,9 @@
 #define CF_ARENAX_BIGLOCK	(1 << 0)
 #define CF_ARENAX_CALLOC	(1 << 1)
 
-// Stage is indexed by 8 bits.
-#define CF_ARENAX_MAX_STAGES (1 << 8) // 256
+#ifndef CF_ARENAX_MAX_STAGES
+#define CF_ARENAX_MAX_STAGES 256
+#endif
 
 typedef uint64_t cf_arenax_handle;
 
@@ -145,7 +146,7 @@ static inline void
 cf_arenax_set_handle(cf_arenax_handle* h, uint32_t stage_id,
 		uint32_t element_id)
 {
-	*h = (stage_id << ELEMENT_ID_NUM_BITS) | element_id;
+	*h = ((uint64_t)stage_id << ELEMENT_ID_NUM_BITS) | element_id;
 }
 
 cf_arenax_err cf_arenax_add_stage(cf_arenax* _this);

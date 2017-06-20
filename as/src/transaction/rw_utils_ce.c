@@ -87,7 +87,7 @@ create_only_check(const as_record* r, const as_msg* m)
 void
 write_delete_record(as_record* r, as_index_tree* tree)
 {
-	as_index_delete(tree, &r->key);
+	as_index_delete(tree, &r->keyd);
 }
 
 
@@ -118,4 +118,11 @@ repl_write_flag_pickle(const as_transaction* tr, const uint8_t* buf,
 		uint32_t* info)
 {
 	// Do nothing.
+}
+
+
+bool
+repl_write_pickle_is_drop(const uint8_t* buf, uint32_t info)
+{
+	return as_record_pickle_is_binless(buf);
 }

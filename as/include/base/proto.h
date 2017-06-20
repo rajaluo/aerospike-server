@@ -55,9 +55,9 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_GENERATION				3
 #define AS_PROTO_RESULT_FAIL_PARAMETER				4
 #define AS_PROTO_RESULT_FAIL_RECORD_EXISTS			5	// if 'WRITE_ADD', could fail because already exists
-#define AS_PROTO_RESULT_FAIL_BIN_EXISTS				6
+#define AS_PROTO_RESULT_FAIL_UNUSED_6				6	// recycle - was AS_PROTO_RESULT_FAIL_BIN_EXISTS
 #define AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH	7
-#define AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE	8
+#define AS_PROTO_RESULT_FAIL_OUT_OF_SPACE			8
 #define AS_PROTO_RESULT_FAIL_TIMEOUT				9
 #define AS_PROTO_RESULT_FAIL_UNUSED_10				10	// recycle - was AS_PROTO_RESULT_FAIL_NOXDR
 #define AS_PROTO_RESULT_FAIL_UNAVAILABLE			11	// error returned during node down and partition isn't available
@@ -66,7 +66,7 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_KEY_BUSY				14
 #define AS_PROTO_RESULT_FAIL_SCAN_ABORT				15
 #define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE	16	// asked to do something we don't do for a particular configuration
-#define AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND			17
+#define AS_PROTO_RESULT_FAIL_UNUSED_17				17	// recycle - was AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND
 #define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD		18
 #define AS_PROTO_RESULT_FAIL_KEY_MISMATCH			19
 #define AS_PROTO_RESULT_FAIL_NAMESPACE				20
@@ -187,17 +187,18 @@ typedef struct as_comp_proto_s {
 /* as_msg_field
 * Aerospike message field */
 typedef struct as_msg_field_s {
-#define AS_MSG_FIELD_TYPE_NAMESPACE 0 	// UTF8 string
-#define AS_MSG_FIELD_TYPE_SET 1
-#define AS_MSG_FIELD_TYPE_KEY 2 		// contains a key value
-#define AS_MSG_FIELD_TYPE_DIGEST_RIPE 4 // Key digest computed with RIPE160
-#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY 6
-#define AS_MSG_FIELD_TYPE_TRID 7
-#define AS_MSG_FIELD_TYPE_SCAN_OPTIONS 8
+#define AS_MSG_FIELD_TYPE_NAMESPACE				0
+#define AS_MSG_FIELD_TYPE_SET					1
+#define AS_MSG_FIELD_TYPE_KEY					2
+#define AS_MSG_FIELD_TYPE_DIGEST_RIPE			4
+#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY		6
+#define AS_MSG_FIELD_TYPE_TRID					7
+#define AS_MSG_FIELD_TYPE_SCAN_OPTIONS			8
+#define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT		9
 
 #define AS_MSG_FIELD_TYPE_INDEX_NAME			21
 #define	AS_MSG_FIELD_TYPE_INDEX_RANGE			22
-#define AS_MSG_FIELD_TYPE_INDEX_TYPE  			26
+#define AS_MSG_FIELD_TYPE_INDEX_TYPE			26
 
 // UDF RANGE: 30-39
 #define AS_MSG_FIELD_TYPE_UDF_FILENAME			30
@@ -208,6 +209,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_QUERY_BINLIST			40
 #define AS_MSG_FIELD_TYPE_BATCH					41
 #define AS_MSG_FIELD_TYPE_BATCH_WITH_SET		42
+#define AS_MSG_FIELD_TYPE_PREDEXP				43
 
 	/* NB: field_sz is sizeof(type) + sizeof(data) */
 	uint32_t field_sz; // get the data size through the accessor function, don't worry, it's a small macro
@@ -224,16 +226,18 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY	0x00000010
 #define AS_MSG_FIELD_BIT_TRID				0x00000020
 #define AS_MSG_FIELD_BIT_SCAN_OPTIONS		0x00000040
-#define AS_MSG_FIELD_BIT_INDEX_NAME			0x00000080
-#define	AS_MSG_FIELD_BIT_INDEX_RANGE		0x00000100
-#define AS_MSG_FIELD_BIT_INDEX_TYPE  		0x00000200
-#define AS_MSG_FIELD_BIT_UDF_FILENAME		0x00000400
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION		0x00000800
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST		0x00001000
-#define AS_MSG_FIELD_BIT_UDF_OP				0x00002000
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST		0x00004000
-#define AS_MSG_FIELD_BIT_BATCH				0x00008000
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET		0x00010000
+#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT		0x00000080
+#define AS_MSG_FIELD_BIT_INDEX_NAME			0x00000100
+#define	AS_MSG_FIELD_BIT_INDEX_RANGE		0x00000200
+#define AS_MSG_FIELD_BIT_INDEX_TYPE  		0x00000400
+#define AS_MSG_FIELD_BIT_UDF_FILENAME		0x00000800
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION		0x00001000
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST		0x00002000
+#define AS_MSG_FIELD_BIT_UDF_OP				0x00004000
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST		0x00008000
+#define AS_MSG_FIELD_BIT_BATCH				0x00010000
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET		0x00020000
+#define AS_MSG_FIELD_BIT_PREDEXP			0x00040000
 
 // as_msg ops
 
@@ -368,7 +372,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO2_GENERATION_GT		(1 << 3) // apply write if new generation > old, good for restore
 #define AS_MSG_INFO2_DURABLE_DELETE		(1 << 4) // op resulting in record deletion leaves tombstone (Enterprise only)
 #define AS_MSG_INFO2_CREATE_ONLY		(1 << 5) // write record only if it doesn't exist
-#define AS_MSG_INFO2_BIN_CREATE_ONLY	(1 << 6) // write bin only if it doesn't exist
+// (Note:  Bit 6 is unused.)
 #define AS_MSG_INFO2_RESPOND_ALL_OPS	(1 << 7) // all bin ops (read, write, or modify) require a response, in request order
 
 #define AS_MSG_INFO3_LAST				(1 << 0) // this is the last of a multi-part message
@@ -377,7 +381,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO3_UPDATE_ONLY		(1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE	(1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY		(1 << 5) // completely replace existing record, do not create new record
-#define AS_MSG_INFO3_BIN_REPLACE_ONLY	(1 << 6) // replace existing bin, do not create new bin
+// (Note:  Bit 6 is unused.)
 // (Note:  Bit 7 is unused.)
 
 #define AS_MSG_FIELD_SCAN_INCLUDE_LDT_DATA			(0x02) // whether to send ldt bin data back to the client
@@ -461,7 +465,7 @@ as_msg_op_iterate(as_msg *msg, as_msg_op *current, int *n)
 
 		as_msg_field *mf = (as_msg_field*)msg->data;
 
-		for (uint i = 0; i < msg->n_fields; i++) {
+		for (uint16_t i = 0; i < msg->n_fields; i++) {
 			mf = as_msg_field_get_next(mf);
 		}
 
@@ -532,8 +536,8 @@ extern bool as_msg_peek_data_in_memory(const as_msg *m);
 extern uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		const char *set, int set_len, const cf_digest *d, uint64_t trid);
 
-extern uint8_t * as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1,
-		uint info2, uint info3, uint32_t generation, uint32_t record_ttl,
+extern uint8_t * as_msg_write_header(uint8_t *buf, size_t msg_sz, uint8_t info1,
+		uint8_t info2, uint8_t info3, uint32_t generation, uint32_t record_ttl,
 		uint32_t transaction_ttl, uint32_t n_fields, uint32_t n_ops);
 
 // Async IO

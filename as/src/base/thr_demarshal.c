@@ -40,6 +40,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
+#include "hardware.h"
 #include "hist.h"
 #include "socket.h"
 #include "tls.h"
@@ -88,7 +89,7 @@ static cf_sockets g_sockets;
 
 pthread_mutex_t	g_file_handle_a_LOCK = PTHREAD_MUTEX_INITIALIZER;
 as_file_handle	**g_file_handle_a = 0;
-uint			g_file_handle_a_sz;
+uint32_t		g_file_handle_a_sz;
 pthread_t		g_demarshal_reaper_th;
 
 void *thr_demarshal_reaper_fn(void *arg);
@@ -150,11 +151,11 @@ thr_demarshal_reaper_fn(void *arg)
 
 	while (true) {
 		uint64_t now = cf_getms();
-		uint inuse_cnt = 0;
+		uint32_t inuse_cnt = 0;
 		uint64_t kill_ms = g_config.proto_fd_idle_ms;
 		bool refresh = false;
 
-		if (now - last > (uint64_t)(g_config.sec_cfg.privilege_refresh_period * 1000)) {
+		if (now - last > (uint64_t)g_config.sec_cfg.privilege_refresh_period * 1000) {
 			refresh = true;
 			last = now;
 		}
@@ -208,7 +209,7 @@ thr_demarshal_reaper_fn(void *arg)
 
 		// Validate the system statistics.
 		if (g_stats.proto_connections_opened - g_stats.proto_connections_closed != inuse_cnt) {
-			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count:  %"PRIu64" in stats vs %d calculated",
+			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count:  %"PRIu64" in stats vs %u calculated",
 					g_stats.proto_connections_opened - g_stats.proto_connections_closed,
 					inuse_cnt);
 		}
@@ -384,6 +385,11 @@ thr_demarshal(void *unused)
 		return(0);
 	}
 
+	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+		cf_detail(AS_DEMARSHAL, "pinning thread to CPU %d", thr_id);
+		cf_topo_pin_to_cpu((cf_topo_cpu_index)thr_id);
+	}
+
 	cf_poll_create(&poll);
 
 	// First thread accepts new connection at interface socket.
@@ -510,9 +516,17 @@ thr_demarshal(void *unused)
 					cf_rc_free(fd_h); // will free even with ref-count of 2
 				}
 				else {
-					// Round-robin pick up demarshal thread epoll_fd and add
-					// this new connection to epoll.
-					int id = (id_cntr++) % g_demarshal_args->num_threads;
+					int32_t id;
+
+					if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE) {
+						cf_detail(AS_DEMARSHAL, "no CPU pinning - dispatching incoming connection round-robin");
+						id = (id_cntr++) % g_demarshal_args->num_threads;
+					}
+					else {
+						id = cf_topo_socket_cpu(&fd_h->sock);
+						cf_detail(AS_DEMARSHAL, "incoming connection on CPU %d", id);
+					}
+
 					fd_h->poll = g_demarshal_args->polls[id];
 
 					// Place the client socket in the event queue.
@@ -628,6 +642,8 @@ thr_demarshal(void *unused)
 						goto NextEvent;
 					}
 				}
+
+				cf_debug(AS_DEMARSHAL, "running on CPU %hu", cf_topo_current_cpu());
 
 				// fd_h->proto_unread == 0 - finished reading complete proto.
 				// In current pipelining model, can't rearm fd_h until end of
@@ -826,8 +842,6 @@ as_demarshal_start()
 	memset(dm, 0, sizeof(demarshal_args));
 	g_demarshal_args = dm;
 
-	dm->num_threads = g_config.n_service_threads;
-
 	g_freeslot = cf_queue_create(sizeof(int), true);
 
 	if (!g_freeslot) {
@@ -845,6 +859,11 @@ as_demarshal_start()
 
 	// Create all the epoll_fds and wait for all the threads to come up.
 
+	cf_info(AS_DEMARSHAL, "starting %u demarshal threads",
+			g_config.n_service_threads);
+
+	dm->num_threads = g_config.n_service_threads;
+
 	for (int32_t i = 1; i < dm->num_threads; ++i) {
 		if (pthread_create(&dm->dm_th[i], NULL, thr_demarshal, NULL) != 0) {
 			cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
@@ -853,8 +872,7 @@ as_demarshal_start()
 
 	for (int32_t i = 1; i < dm->num_threads; i++) {
 		while (CEFD(dm->polls[i]) == 0) {
-			sleep(1);
-			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads...");
+			usleep(1000);
 		}
 	}
 
@@ -864,11 +882,10 @@ as_demarshal_start()
 		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
 	}
 
+	// For orderly startup log, wait for endpoint setup.
 	while (CEFD(dm->polls[0]) == 0) {
-		sleep(1);
-		cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads...");
+		usleep(1000);
 	}
 
-	cf_info(AS_DEMARSHAL, "Started %d Demarshal Threads", dm->num_threads);
 	return 0;
 }

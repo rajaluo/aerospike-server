@@ -196,14 +196,18 @@ int32_t
 as_particle_size_from_pickled(uint8_t **p_pickled)
 {
 	const uint8_t *pickled = (const uint8_t *)*p_pickled;
-	uint8_t type = *pickled++;
+	uint8_t type = safe_particle_type(*pickled++);
+
+	if (type == AS_PARTICLE_TYPE_BAD) {
+		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+	}
+
 	const uint32_t *p32 = (const uint32_t *)pickled;
 	uint32_t value_size = cf_swap_from_be32(*p32++);
 	const uint8_t *value = (const uint8_t *)p32;
 
 	*p_pickled = (uint8_t *)value + value_size;
 
-	// TODO - safety-check type.
 	return particle_vtable[type]->size_from_wire_fn(value, value_size);
 }
 
@@ -1119,7 +1123,7 @@ as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 uint32_t
 as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val)
 {
-	*p_val = as_llist_scan(rd->ns, rd->ns->partitions[as_partition_getid(rd->keyd)].sub_vp, rd, b);
+	*p_val = as_llist_scan(rd->ns, rd->ns->partitions[as_partition_getid(&rd->r->keyd)].sub_vp, rd, b);
 
 	if (! *p_val) {
 		return 0;

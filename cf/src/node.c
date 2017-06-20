@@ -1,7 +1,7 @@
 /*
- * id.c
+ * node.c
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,53 +20,45 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#include "fault.h"
-#include "util.h" // We don't have our own header file.
+#include "node.h"
+
+#include <errno.h>
+#include <stdint.h>
+#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 
-#include <errno.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-#include <unistd.h>
+#include "fault.h"
 
-/*
-** This has nowhere else to go.
-*/
-
-const cf_digest cf_digest_zero = { .digest = { 0 } };
-
-/*
-** Node IDs are great things to use as keys in the hash table.
-*/
 
 uint32_t
-cf_nodeid_shash_fn(void *value)
+cf_nodeid_shash_fn(const void *key)
 {
-	cf_node id = *(cf_node *)value;
+	cf_node id = *(const cf_node *)key;
+
 	return (uint32_t)(id >> 32) | (uint32_t)id;
 }
 
 uint32_t
-cf_nodeid_rchash_fn(void *value, uint32_t len)
+cf_nodeid_rchash_fn(const void *key, uint32_t key_size)
 {
-	(void)len;
-	return cf_nodeid_shash_fn(value);
+	(void)key_size;
+
+	return cf_nodeid_shash_fn(key);
 }
 
 char *
-cf_node_name(void)
+cf_node_name()
 {
-	char buffer[1000];
-	int32_t res = gethostname(buffer, sizeof(buffer));
+	char buffer[1024];
+	int res = gethostname(buffer, sizeof(buffer));
 
-	if (res == sizeof(buffer) || (res < 0 && errno == ENAMETOOLONG)) {
-		cf_crash(CF_MISC, "Host name too long");
+	if (res == (int)sizeof(buffer) || (res < 0 && errno == ENAMETOOLONG)) {
+		cf_crash(CF_MISC, "host name too long");
 	}
 
 	if (res < 0) {
-		cf_warning(CF_MISC, "Error while determining host name: %d (%s)",
+		cf_warning(CF_MISC, "error while determining host name: %d (%s)",
 				errno, cf_strerror(errno));
 		buffer[0] = 0;
 	}

@@ -37,11 +37,14 @@
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
 
+#include "enhanced_alloc.h"
+#include "hardware.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
 
-#include "base/cluster_config.h"
 #include "base/security_config.h"
+#include "fabric/clustering.h"
+#include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
 
@@ -61,8 +64,7 @@ struct as_namespace_s;
 #define AS_CLUSTER_NAME_SZ 65
 
 #define MAX_DEMARSHAL_THREADS 256
-#define MAX_FABRIC_WORKERS 128
-#define MAX_BATCH_THREADS 64
+#define MAX_BATCH_THREADS 256
 
 // Declare bools with PAD_BOOL so they can't share a 4-byte space with other
 // bools, chars or shorts. This prevents adjacent bools set concurrently in
@@ -87,42 +89,37 @@ typedef struct as_config_s {
 	gid_t			gid;
 	uint32_t		paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
 	char*			pidfile;
-	int				n_service_threads;
-	uint32_t		n_transaction_queues;
-	uint32_t		n_transaction_threads_per_queue;
 	int				n_proto_fd_max;
 
 	// Normally hidden:
 
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
+	cf_topo_auto_pin auto_pin;
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t		batch_max_requests; // maximum count of database requests in a single batch
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
-	int				n_batch_index_threads;
+	uint32_t		n_batch_index_threads;
 	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
+	as_clustering_config clustering_config;
 	PAD_BOOL		fabric_benchmarks_enabled;
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
-	int				n_fabric_workers;
 	uint32_t		hist_track_back; // total time span in seconds over which to cache data
 	uint32_t		hist_track_slice; // period in seconds at which to cache histogram data
 	char*			hist_track_thresholds; // comma-separated bucket (ms) values to track
 	int				n_info_threads;
 	PAD_BOOL		ldt_benchmarks;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
-	int				migrate_max_num_incoming;
-	int				n_migrate_threads;
+	uint32_t		migrate_max_num_incoming;
+	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t		nsup_period;
 	PAD_BOOL		nsup_startup_evict;
-	uint32_t		paxos_max_cluster_size;
-	paxos_protocol_enum paxos_protocol;
-	paxos_recovery_policy_enum paxos_recovery_policy;
-	uint32_t		paxos_retransmit_period;
+	uint32_t		paxos_max_cluster_size; // TODO - has been deprecated - clean up
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	int				proto_slow_netio_sleep_ms; // dynamic only
 	uint32_t		query_bsize;
@@ -148,24 +145,27 @@ typedef struct as_config_s {
 	uint32_t		scan_max_done; // maximum number of finished scans kept for monitoring
 	uint32_t		scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
 	uint32_t		scan_threads; // size of scan thread pool
+	uint32_t		n_service_threads;
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	PAD_BOOL		sindex_gc_enable_histogram; // dynamic only
+	uint32_t		sindex_gc_max_rate; // Max sindex entries processed per second for gc
+	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_pending_limit; // 0 means no limit
+	uint32_t		n_transaction_queues;
 	PAD_BOOL		transaction_repeatable_read;
 	uint32_t		transaction_retry_ms;
+	uint32_t		n_transaction_threads_per_queue;
 	char*			work_directory;
 	PAD_BOOL		write_duplicate_resolution_disable;
 
 	// For special debugging or bug-related repair:
 
-	PAD_BOOL		asmalloc_enabled; // whether ASMalloc integration is enabled
+	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
 	PAD_BOOL		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
 	int64_t			max_msgs_per_type; // maximum number of "msg" objects permitted per type
-	PAD_BOOL		memory_accounting; // whether memory accounting is enabled
 	uint32_t		prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
-	PAD_BOOL		non_master_sets_delete;	// dynamic only - locally delete non-master records in sets that are being emptied
 
 	//--------------------------------------------
 	// network::service context.
@@ -196,13 +196,17 @@ typedef struct as_config_s {
 
 	cf_serv_spec	fabric; // fabric service
 
-	// Normally hidden, in canonical configuration file order:
+	// Normally hidden:
 
+	uint32_t		n_fabric_channel_fds[AS_FABRIC_N_CHANNELS];
+	uint32_t		n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
 	PAD_BOOL		fabric_keepalive_enabled;
-	int				fabric_keepalive_time;
 	int				fabric_keepalive_intvl;
 	int				fabric_keepalive_probes;
-	int				fabric_latency_max_ms; // time window for ordering
+	int				fabric_keepalive_time;
+	uint32_t		fabric_latency_max_ms; // time window for ordering
+	uint32_t		fabric_recv_rearm_threshold;
+	uint32_t		n_fabric_send_threads;
 
 	//--------------------------------------------
 	// network::info context.
@@ -217,7 +221,6 @@ typedef struct as_config_s {
 	//
 
 	mod_lua_config	mod_lua;
-	cluster_config_t cluster;
 	as_sec_config	sec_cfg;
 
 
@@ -226,14 +229,12 @@ typedef struct as_config_s {
 	// relocated...
 	//
 
-	// Cluster-config related.
-	cf_node			self_node; // unique instance ID either HW inspired or cluster group/node ID
-	uint16_t		cluster_mode;
-	cf_node			hw_self_node; // cache the HW value self-node value, for various uses
+	// Global variable that just shouldn't be here.
+	cf_node			self_node;
 
 	// Global variables that just shouldn't be here.
 	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
-	xdr_lastship_s	xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
+	xdr_node_lst	xdr_peers_lst[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
 	uint64_t		xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node
 
 	// Namespaces.
@@ -259,7 +260,6 @@ bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 
 extern as_config g_config;
-extern xdr_config g_xcfg;
 
 
 //==========================================================
@@ -272,6 +272,7 @@ typedef struct cfg_line_s {
 	char*	name_tok;
 	char*	val_tok_1;
 	char*	val_tok_2;
+	char*	val_tok_3;
 } cfg_line;
 
 void cfg_enterprise_only(const cfg_line* p_line);

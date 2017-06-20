@@ -43,6 +43,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
+#include "hardware.h"
 #include "linear_hist.h"
 #include "vmapx.h"
 
@@ -72,7 +73,6 @@ pthread_t g_nsup_thread;
 // for convenient comparison to run-time eviction.
 //
 
-#define NUM_EVICT_THREADS 24
 #define EVAL_WRITE_STATE_FREQUENCY 1024
 #define COLD_START_HIST_MIN_BUCKETS 100000 // histogram memory is transient
 
@@ -109,6 +109,7 @@ cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_prep_thread_info_s {
 	as_namespace*		ns;
 	cf_atomic32*		p_pid;
+	uint32_t			i_cpu;
 	linear_hist*		hist;
 	bool*				sets_not_evicting;
 } evict_prep_thread_info;
@@ -117,6 +118,9 @@ void*
 run_cold_start_evict_prep(void* udata)
 {
 	evict_prep_thread_info* p_info = (evict_prep_thread_info*)udata;
+
+	cf_topo_pin_to_cpu((cf_topo_cpu_index)p_info->i_cpu);
+
 	as_namespace *ns = p_info->ns;
 
 	cold_start_evict_prep_info cb_info;
@@ -160,7 +164,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (void_time != 0) {
 		if (! p_info->sets_not_evicting[set_id] &&
 				void_time < ns->cold_start_threshold_void_time) {
-			as_index_delete(p_partition->vp, &r->key);
+			as_index_delete(p_partition->vp, &r->keyd);
 			p_info->num_evicted++;
 		}
 	}
@@ -177,6 +181,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_thread_info_s {
 	as_namespace*	ns;
 	cf_atomic32		pid;
+	cf_atomic32		i_cpu;
 	bool*			sets_not_evicting;
 	cf_atomic32		total_evicted;
 	cf_atomic32		total_0_void_time;
@@ -186,6 +191,9 @@ void*
 run_cold_start_evict(void* udata)
 {
 	evict_thread_info* p_info = (evict_thread_info*)udata;
+
+	cf_topo_pin_to_cpu((cf_topo_cpu_index)cf_atomic32_incr(&p_info->i_cpu));
+
 	as_namespace* ns = p_info->ns;
 
 	cold_start_evict_info cb_info;
@@ -242,11 +250,11 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 //------------------------------------------------
 // Set cold-start eviction threshold.
 //
-static uint32_t
+static uint64_t
 set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 {
 	linear_hist_threshold threshold;
-	uint32_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &threshold);
+	uint64_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &threshold);
 	bool all_buckets = threshold.value == 0xFFFFffff;
 
 	if (subtotal == 0) {
@@ -254,7 +262,7 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 			cf_warning(AS_NSUP, "{%s} cold-start found no records eligible for eviction", ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %u > target %u (%.1f pct)",
+			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
 					ns->name, threshold.value, threshold.bucket_index,
 					threshold.bucket_width, threshold.bucket_count,
 					threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
@@ -264,7 +272,7 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 	}
 
 	if (all_buckets) {
-		cf_warning(AS_NSUP, "{%s} cold-start would evict all %u records eligible - not evicting!", ns->name, subtotal);
+		cf_warning(AS_NSUP, "{%s} cold-start would evict all %lu records eligible - not evicting!", ns->name, subtotal);
 		return 0;
 	}
 
@@ -346,24 +354,26 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	}
 
 	// Split these tasks across multiple threads.
-	pthread_t evict_threads[NUM_EVICT_THREADS];
+	uint32_t n_cpus = cf_topo_count_cpus();
+	pthread_t evict_threads[n_cpus];
 
 	// Reduce all partitions to build the eviction histogram.
-	evict_prep_thread_info prep_thread_infos[NUM_EVICT_THREADS];
+	evict_prep_thread_info prep_thread_infos[n_cpus];
 	cf_atomic32 pid = -1;
 
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		prep_thread_infos[n].ns = ns;
 		prep_thread_infos[n].p_pid = &pid;
+		prep_thread_infos[n].i_cpu = n;
 		prep_thread_infos[n].hist = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
 		prep_thread_infos[n].sets_not_evicting = sets_not_evicting;
 
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_infos[n]) != 0) {
-			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
+			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %u", ns->name, n);
 		}
 	}
 
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		pthread_join(evict_threads[n], NULL);
 
 		if (n == 0) {
@@ -376,7 +386,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	// Now we're single-threaded again.
 
 	// Calculate the eviction threshold.
-	uint32_t n_evictable = set_cold_start_threshold(ns, prep_thread_infos[0].hist);
+	uint64_t n_evictable = set_cold_start_threshold(ns, prep_thread_infos[0].hist);
 
 	linear_hist_destroy(prep_thread_infos[0].hist);
 
@@ -386,24 +396,25 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 		return true;
 	}
 
-	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
+	cf_info(AS_NSUP, "{%s} cold-start found %lu records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
 
 	// Reduce all partitions to evict based on the thresholds.
-	evict_thread_info thread_info;
+	evict_thread_info thread_info = {
+			.ns = ns,
+			.pid = -1,
+			.i_cpu = -1,
+			.sets_not_evicting = sets_not_evicting,
+			.total_evicted = 0,
+			.total_0_void_time = 0
+	};
 
-	thread_info.ns = ns;
-	thread_info.pid = -1;
-	thread_info.sets_not_evicting = sets_not_evicting;
-	thread_info.total_evicted = 0;
-	thread_info.total_0_void_time = 0;
-
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict, (void*)&thread_info) != 0) {
-			cf_crash(AS_NSUP, "{%s} failed to create evict thread %d", ns->name, n);
+			cf_crash(AS_NSUP, "{%s} failed to create evict thread %u", ns->name, n);
 		}
 	}
 
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		pthread_join(evict_threads[n], NULL);
 	}
 	// Now we're single-threaded again.
@@ -437,7 +448,7 @@ garbage_collect_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	// If we're past void-time plus safety margin, delete the record.
 	if (void_time != 0 && p_info->now > void_time + g_config.prole_extra_ttl) {
-		as_index_delete(p_info->p_tree, &r_ref->r->key);
+		as_index_delete(p_info->p_tree, &r_ref->r->keyd);
 		p_info->num_deleted++;
 	}
 
@@ -494,95 +505,6 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 
 //
 // END - Temporary dangling prole garbage collection.
-//==========================================================
-
-//==========================================================
-// Temporary dangling prole (or other) sets deletion.
-//
-
-typedef struct non_master_sets_delete_info_s {
-	as_namespace*	ns;
-	bool*			sets_deleting;
-	as_index_tree*	p_tree;
-	uint32_t		num_deleted;
-} non_master_sets_delete_info;
-
-static void
-non_master_sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
-{
-	non_master_sets_delete_info* p_info = (non_master_sets_delete_info*)udata;
-	uint32_t set_id = as_index_get_set_id(r_ref->r);
-
-	if (p_info->sets_deleting[set_id]) {
-		as_index_delete(p_info->p_tree, &r_ref->r->key);
-		p_info->num_deleted++;
-	}
-
-	as_record_done(r_ref, p_info->ns);
-}
-
-static void
-non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
-{
-	cf_info(AS_NSUP, "namespace %s: deleting non-master records in sets being emptied",
-			ns->name);
-
-	as_partition_reservation rsv;
-
-	// Look at all non-master partitions.
-	for (int n = 0; n < AS_PARTITIONS; n++) {
-		AS_PARTITION_RESERVATION_INIT(rsv);
-
-		if (0 == as_partition_reserve_write(ns, n, &rsv, 0, 0)) {
-			// This is a master partition - continue.
-			as_partition_release(&rsv);
-		}
-		else if (0 == as_partition_reserve_read(ns, n, &rsv, 0, 0)) {
-			// This is a prole partition - check it.
-			non_master_sets_delete_info cb_info;
-
-			cb_info.ns = ns;
-			cb_info.sets_deleting = sets_deleting;
-			cb_info.p_tree = rsv.tree;
-			cb_info.num_deleted = 0;
-
-			// Reduce the partition, checking and deleting records.
-			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
-
-			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted proles",
-						ns->name, n, cb_info.num_deleted);
-			}
-
-			as_partition_release(&rsv);
-		}
-		else {
-			// We don't own this partition - check anyway.
-			as_partition_reserve_migrate(ns, n, &rsv, 0);
-
-			non_master_sets_delete_info cb_info;
-
-			cb_info.ns = ns;
-			cb_info.sets_deleting = sets_deleting;
-			cb_info.p_tree = rsv.tree;
-			cb_info.num_deleted = 0;
-
-			// Reduce the partition, checking and deleting records.
-			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
-
-			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %u records remaining",
-						ns->name, n, cb_info.num_deleted, rsv.state,
-						as_index_tree_size(rsv.tree));
-			}
-
-			as_partition_release(&rsv);
-		}
-	}
-}
-
-//
-// END - Temporary dangling prole (or other) sets deletion.
 //==========================================================
 
 
@@ -710,7 +632,7 @@ add_to_obj_size_histograms(as_namespace* ns, as_index* r)
 {
 	uint32_t set_id = as_index_get_set_id(r);
 	linear_hist* set_obj_size_hist = ns->set_obj_size_hists[set_id];
-	uint64_t n_rblocks = r->storage_key.ssd.n_rblocks;
+	uint64_t n_rblocks = r->n_rblocks;
 
 	linear_hist_insert_data_point(ns->obj_size_hist, n_rblocks);
 
@@ -737,58 +659,6 @@ add_to_ttl_histograms(as_namespace* ns, as_index* r)
 }
 
 //------------------------------------------------
-// Reduce callback deletes sets.
-// - does set deletion
-// - does expiration
-// - builds object size & TTL histograms
-// - counts 0-void-time records
-//
-typedef struct sets_delete_info_s {
-	as_namespace*	ns;
-	uint32_t		now;
-	bool*			sets_deleting;
-	uint32_t		num_deleted;
-	uint32_t		num_expired;
-	uint32_t		num_0_void_time;
-} sets_delete_info;
-
-static void
-sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
-{
-	as_index* r = r_ref->r;
-	sets_delete_info* p_info = (sets_delete_info*)udata;
-	as_namespace* ns = p_info->ns;
-	uint32_t set_id = as_index_get_set_id(r);
-
-	if (p_info->sets_deleting[set_id]) {
-		queue_for_delete(ns, &r->key);
-		p_info->num_deleted++;
-
-		as_record_done(r_ref, ns);
-		return;
-	}
-
-	uint32_t void_time = r->void_time;
-
-	if (void_time != 0) {
-		if (p_info->now > void_time) {
-			queue_for_delete(ns, &r->key);
-			p_info->num_expired++;
-		}
-		else {
-			add_to_obj_size_histograms(ns, r);
-			add_to_ttl_histograms(ns, r);
-		}
-	}
-	else {
-		add_to_obj_size_histograms(ns, r);
-		p_info->num_0_void_time++;
-	}
-
-	as_record_done(r_ref, ns);
-}
-
-//------------------------------------------------
 // Reduce callback prepares for eviction.
 // - builds object size, eviction & TTL histograms
 // - counts 0-void-time records
@@ -796,7 +666,7 @@ sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_prep_info_s {
 	as_namespace*	ns;
 	bool*			sets_not_evicting;
-	uint32_t		num_0_void_time;
+	uint64_t		num_0_void_time;
 } evict_prep_info;
 
 static void
@@ -834,7 +704,7 @@ typedef struct evict_info_s {
 	uint32_t		now;
 	bool*			sets_not_evicting;
 	uint32_t		evict_void_time;
-	uint32_t		num_evicted;
+	uint64_t		num_evicted;
 } evict_info;
 
 static void
@@ -849,12 +719,12 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (void_time != 0) {
 		if (p_info->sets_not_evicting[set_id]) {
 			if (p_info->now > void_time) {
-				queue_for_delete(ns, &r->key);
+				queue_for_delete(ns, &r->keyd);
 				p_info->num_evicted++;
 			}
 		}
 		else if (void_time < p_info->evict_void_time) {
-			queue_for_delete(ns, &r->key);
+			queue_for_delete(ns, &r->keyd);
 			p_info->num_evicted++;
 		}
 	}
@@ -871,8 +741,8 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct expire_info_s {
 	as_namespace*	ns;
 	uint32_t		now;
-	uint32_t		num_expired;
-	uint32_t		num_0_void_time;
+	uint64_t		num_expired;
+	uint64_t		num_0_void_time;
 } expire_info;
 
 static void
@@ -885,7 +755,7 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (void_time != 0) {
 		if (p_info->now > void_time) {
-			queue_for_delete(ns, &r->key);
+			queue_for_delete(ns, &r->keyd);
 			p_info->num_expired++;
 		}
 		else {
@@ -1030,7 +900,7 @@ static bool
 get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 {
 	linear_hist_threshold threshold;
-	uint32_t subtotal = linear_hist_get_threshold_for_fraction(ns->evict_hist, ns->evict_tenths_pct, &threshold);
+	uint64_t subtotal = linear_hist_get_threshold_for_fraction(ns->evict_hist, ns->evict_tenths_pct, &threshold);
 	bool all_buckets = threshold.value == 0xFFFFffff;
 
 	*p_evict_void_time = threshold.value;
@@ -1040,7 +910,7 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 			cf_warning(AS_NSUP, "{%s} no records eligible for eviction", ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %u > target %u (%.1f pct)",
+			cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
 					ns->name, threshold.value, threshold.bucket_index,
 					threshold.bucket_width, threshold.bucket_count,
 					threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
@@ -1050,11 +920,11 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 	}
 
 	if (all_buckets) {
-		cf_warning(AS_NSUP, "{%s} would evict all %u records eligible - not evicting!", ns->name, subtotal);
+		cf_warning(AS_NSUP, "{%s} would evict all %lu records eligible - not evicting!", ns->name, subtotal);
 		return false;
 	}
 
-	cf_info(AS_NSUP, "{%s} found %u records eligible for eviction", ns->name, subtotal);
+	cf_info(AS_NSUP, "{%s} found %lu records eligible for eviction", ns->name, subtotal);
 
 	return true;
 }
@@ -1063,22 +933,18 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 // Stats per namespace at the end of an nsup lap.
 //
 static void
-update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
-		uint32_t n_expired_records, uint32_t n_evicted_records, uint32_t n_deleted_set_records,
-		uint32_t evict_ttl, uint32_t n_set_waits, uint32_t n_clear_waits, uint32_t n_general_waits,
+update_stats(as_namespace* ns, uint64_t n_master, uint64_t n_0_void_time,
+		uint64_t n_expired_objects, uint64_t n_evicted_objects,
+		uint32_t evict_ttl, uint32_t n_general_waits, uint32_t n_clear_waits,
 		uint64_t start_ms)
 {
-	if (n_expired_records != 0) {
-		cf_atomic64_add(&ns->n_expired_objects, n_expired_records);
+	if (n_expired_objects != 0) {
+		cf_atomic64_add(&ns->n_expired_objects, n_expired_objects);
 	}
 
-	if (n_evicted_records != 0) {
+	if (n_evicted_objects != 0) {
 		cf_atomic64_set(&ns->evict_ttl, evict_ttl);
-		cf_atomic64_add(&ns->n_evicted_objects, n_evicted_records);
-	}
-
-	if (n_deleted_set_records != 0) {
-		cf_atomic64_add(&ns->n_deleted_set_objects, n_deleted_set_records);
+		cf_atomic64_add(&ns->n_evicted_objects, n_evicted_objects);
 	}
 
 	ns->non_expirable_objects = n_0_void_time;
@@ -1088,14 +954,14 @@ update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
 	ns->nsup_cycle_duration = (uint32_t)(total_duration_ms / 1000);
 	ns->nsup_cycle_sleep_pct = total_duration_ms == 0 ? 0 : (uint32_t)((n_general_waits * 100) / total_duration_ms);
 
-	cf_info(AS_NSUP, "{%s} Records: %u, %u 0-vt, "
-			"%u(%"PRIu64") expired, %u(%"PRIu64") evicted, "
-			"%u(%"PRIu64") set deletes. "
-			"Evict ttl: %d. Waits: %u,%u,%u. Total time: %"PRIu64" ms",
-			ns->name, n_master, n_0_void_time,
-			n_expired_records, ns->n_expired_objects, n_evicted_records, ns->n_evicted_objects,
-			n_deleted_set_records, ns->n_deleted_set_objects,
-			evict_ttl, n_set_waits, n_clear_waits, n_general_waits, total_duration_ms);
+	cf_info(AS_NSUP, "{%s} nsup-done: master-objects (%lu,%lu) expired (%lu,%lu) evicted (%lu,%lu) evict-ttl %d waits (%u,%u) total-ms %lu",
+			ns->name,
+			n_master, n_0_void_time,
+			ns->n_expired_objects, n_expired_objects,
+			ns->n_evicted_objects, n_evicted_objects,
+			evict_ttl,
+			n_general_waits, n_clear_waits,
+			total_duration_ms);
 }
 
 //------------------------------------------------
@@ -1104,8 +970,6 @@ update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
 void *
 thr_ldt_sup(void *arg)
 {
-	cf_info(AS_LDT, "LDT supervisor started");
-
 	for ( ; ; ) {
 		// Skip 1 second between LDT nsup cycles.
 		struct timespec delay = { 1, 0 };
@@ -1141,8 +1005,6 @@ thr_ldt_sup(void *arg)
 void *
 thr_nsup(void *arg)
 {
-	cf_info(AS_NSUP, "namespace supervisor started");
-
 	// Garbage-collect long-expired proles, one partition per loop.
 	int prole_pids[g_config.n_namespaces];
 
@@ -1167,11 +1029,11 @@ thr_nsup(void *arg)
 
 		// Iterate over every namespace.
 		for (int i = 0; i < g_config.n_namespaces; i++) {
-			uint64_t start_ms = cf_getms();
-
 			as_namespace *ns = g_config.namespaces[i];
 
-			cf_info(AS_NSUP, "{%s} nsup start", ns->name);
+			uint64_t start_ms = cf_getms();
+
+			cf_info(AS_NSUP, "{%s} nsup-start", ns->name);
 
 			linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
 
@@ -1183,22 +1045,17 @@ thr_nsup(void *arg)
 
 			linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
-			uint32_t n_expired_records = 0;
-			uint32_t n_0_void_time_records = 0;
-			uint32_t n_deleted_set_records = 0;
-			uint32_t n_set_waits = 0;
+			uint64_t n_expired_records = 0;
+			uint64_t n_0_void_time_records = 0;
 
 			uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
 
 			bool sets_protected = false;
-			bool do_set_deletion = false;
 
-			// Giving these max possible size to spare us checking each record's
+			// Giving this max possible size to spare us checking each record's
 			// set-id during index reduce.
-			bool sets_deleting[AS_SET_MAX_COUNT + 1];
 			bool sets_not_evicting[AS_SET_MAX_COUNT + 1];
 
-			memset(sets_deleting, 0, sizeof(sets_deleting));
 			memset(sets_not_evicting, 0, sizeof(sets_not_evicting));
 
 			for (uint32_t j = 0; j < num_sets; j++) {
@@ -1217,50 +1074,9 @@ thr_nsup(void *arg)
 					sets_not_evicting[set_id] = true;
 					sets_protected = true;
 				}
-
-				if (IS_SET_DELETED(p_set)) {
-					if (cf_atomic64_get(p_set->n_objects) != 0) {
-						sets_deleting[set_id] = true;
-						do_set_deletion = true;
-
-						cf_info(AS_NSUP, "{%s} deleting set %s", ns->name, p_set->name);
-						continue;
-					}
-
-					// Starts a detached thread which clears all sindex entries
-					// for this set, then switches off the set's 'deleted' flag.
-					as_sindex_initiate_set_delete(ns, p_set);
-				}
 			}
 
-			if (do_set_deletion) {
-				sets_delete_info cb_info;
-
-				memset(&cb_info, 0, sizeof(cb_info));
-				cb_info.ns = ns;
-				cb_info.now = now;
-				cb_info.sets_deleting = sets_deleting;
-
-				// Reduce master partitions, doing set deletion and general
-				// expiration.
-				reduce_master_partitions(ns, sets_delete_reduce_cb, &cb_info, &n_set_waits, "sets-delete");
-
-				n_deleted_set_records = cb_info.num_deleted;
-				n_expired_records = cb_info.num_expired;
-				n_0_void_time_records = cb_info.num_0_void_time;
-			}
-
-			// Wait for delete queue to clear, to reduce the chance we'll need
-			// to do general eviction.
-
-			uint32_t n_clear_waits = 0;
-
-			while (cf_queue_sz(g_p_nsup_delete_q) > 0) {
-				usleep(DELETE_Q_CLEAR_SLEEP_us);
-				n_clear_waits++;
-			}
-
-			uint32_t n_evicted_records = 0;
+			uint64_t n_evicted_records = 0;
 			uint32_t evict_ttl = 0;
 			uint32_t n_general_waits = 0;
 
@@ -1335,9 +1151,8 @@ thr_nsup(void *arg)
 				// For now there's no get_info() call for evict_hist.
 				//linear_hist_save_info(ns->evict_hist);
 			}
-			else if (! do_set_deletion) {
-				// Eviction is not necessary, only expiration. (But if set
-				// deletion was done, expiration has already been done.)
+			else {
+				// Eviction is not necessary, only expiration.
 
 				expire_info cb_info;
 
@@ -1366,31 +1181,22 @@ thr_nsup(void *arg)
 				linear_hist_save_info(ns->set_ttl_hists[set_id]);
 			}
 
-			update_stats(ns, linear_hist_get_total(ns->ttl_hist) + n_0_void_time_records, n_0_void_time_records,
-					n_expired_records, n_evicted_records, n_deleted_set_records,
-					evict_ttl, n_set_waits, n_clear_waits, n_general_waits,
-					start_ms);
+			// Wait for delete queue to clear.
+			uint32_t n_clear_waits = 0;
 
-			// Delete non-master records from set(s) being deleted.
-			if (do_set_deletion && g_config.non_master_sets_delete) {
-				non_master_sets_delete(ns, sets_deleting);
+			while (cf_queue_sz(g_p_nsup_delete_q) > 0) {
+				usleep(DELETE_Q_CLEAR_SLEEP_us);
+				n_clear_waits++;
 			}
+
+			update_stats(ns, linear_hist_get_total(ns->ttl_hist) + n_0_void_time_records, n_0_void_time_records,
+					n_expired_records, n_evicted_records, evict_ttl,
+					n_general_waits, n_clear_waits, start_ms);
 
 			// Garbage-collect long-expired proles, one partition per loop.
 			if (g_config.prole_extra_ttl != 0) {
 				prole_pids[i] = garbage_collect_next_prole_partition(ns, prole_pids[i]);
 			}
-		}
-
-		uint32_t n_clear_waits = 0;
-
-		while (cf_queue_sz(g_p_nsup_delete_q) > 0) {
-			usleep(DELETE_Q_CLEAR_SLEEP_us);
-			n_clear_waits++;
-		}
-
-		if (n_clear_waits) {
-			cf_info(AS_NSUP, "nsup clear waits: %u", n_clear_waits);
 		}
 	}
 
@@ -1410,6 +1216,8 @@ as_nsup_start()
 	if (NULL == (g_p_nsup_delete_q = cf_queue_create(sizeof(record_delete_info), true))) {
 		cf_crash(AS_NSUP, "nsup delete queue create failed");
 	}
+
+	cf_info(AS_NSUP, "starting namespace supervisor threads");
 
 	// Start thread to handle all nsup-generated deletions.
 	if (0 != pthread_create(&g_nsup_delete_thread, 0, run_nsup_delete, NULL)) {

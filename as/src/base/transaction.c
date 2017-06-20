@@ -160,6 +160,9 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_SCAN_OPTIONS:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_SCAN_OPTIONS;
 		break;
+	case AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_SOCKET_TIMEOUT;
+		break;
 	case AS_MSG_FIELD_TYPE_INDEX_NAME:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_INDEX_NAME;
 		break;
@@ -189,6 +192,9 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 		break;
 	case AS_MSG_FIELD_TYPE_BATCH_WITH_SET: // shouldn't get here - batch parent handles this
 		tr->msg_fields |= AS_MSG_FIELD_BIT_BATCH_WITH_SET;
+		break;
+	case AS_MSG_FIELD_TYPE_PREDEXP:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_PREDEXP;
 		break;
 	default:
 		return false;

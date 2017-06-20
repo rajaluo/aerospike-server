@@ -32,11 +32,11 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "msg.h"
-#include "rchash.h"
-#include "util.h"
+#include "node.h"
 
 #include "fabric/hb.h"
 #include "fabric/partition.h"
@@ -47,15 +47,18 @@ struct as_namespace_s;
 // For receiver-side migration flow-control.
 // TODO - move to namespace? Go even lower than 4?
 #define AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING 4
+#define AS_MIGRATE_LIMIT_MAX_NUM_INCOMING 64
 
-/*
- *  Maximum permissible number of migrate xmit threads.
- */
-#define MAX_NUM_MIGRATE_XMIT_THREADS  (100)
+// Maximum permissible number of migrate xmit threads.
+#define MAX_NUM_MIGRATE_XMIT_THREADS 100
+
+typedef enum {
+	EMIG_TYPE_TRANSFER,
+	EMIG_TYPE_SIGNAL_ALL_DONE
+} emig_type;
 
 #define TX_FLAGS_NONE           ((uint32_t) 0x0)
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
-#define TX_FLAGS_REQUEST        ((uint32_t) 0x2)
 
 // If 0 then it is a migration start from an old node.
 #define MIG_TYPE_START_IS_NORMAL 1
@@ -71,6 +74,7 @@ typedef struct partition_migrate_record_s {
 	struct as_namespace_s *ns;
 	uint32_t pid;
 	uint64_t cluster_key;
+	emig_type type;
 	uint32_t tx_flags;
 } partition_migrate_record;
 
@@ -78,7 +82,7 @@ typedef struct partition_migrate_record_s {
 void as_migrate_init();
 void as_migrate_emigrate(const partition_migrate_record *pmr);
 bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, uint32_t partition_id, int state);
-void as_migrate_set_num_xmit_threads(int n_threads);
+void as_migrate_set_num_xmit_threads(uint32_t n_threads);
 void as_migrate_dump(bool verbose);
 
 
@@ -89,7 +93,7 @@ void as_migrate_dump(bool verbose);
 typedef enum {
 	// These values go on the wire, so mind backward compatibility if changing.
 	MIG_FIELD_OP,
-	MIG_FIELD_EMIG_INSERT_ID,
+	MIG_FIELD_UNUSED_1,
 	MIG_FIELD_EMIG_ID,
 	MIG_FIELD_NAMESPACE,
 	MIG_FIELD_PARTITION,
@@ -97,10 +101,10 @@ typedef enum {
 	MIG_FIELD_GENERATION,
 	MIG_FIELD_RECORD,
 	MIG_FIELD_CLUSTER_KEY,
-	MIG_FIELD_VINFOSET, // deprecated
+	MIG_FIELD_UNUSED_9,
 	MIG_FIELD_VOID_TIME,
-	MIG_FIELD_TYPE, // deprecated
-	MIG_FIELD_REC_PROPS,
+	MIG_FIELD_UNUSED_11,
+	MIG_FIELD_UNUSED_12,
 	MIG_FIELD_INFO,
 	MIG_FIELD_LDT_VERSION,
 	MIG_FIELD_LDT_PDIGEST,
@@ -109,10 +113,15 @@ typedef enum {
 	MIG_FIELD_LDT_PVOID_TIME,
 	MIG_FIELD_LAST_UPDATE_TIME,
 	MIG_FIELD_FEATURES,
-	MIG_FIELD_PARTITION_SIZE,
+	MIG_FIELD_UNUSED_21,
 	MIG_FIELD_META_RECORDS,
 	MIG_FIELD_META_SEQUENCE,
 	MIG_FIELD_META_SEQUENCE_FINAL,
+	MIG_FIELD_PARTITION_SIZE,
+	MIG_FIELD_SET_NAME,
+	MIG_FIELD_KEY,
+	MIG_FIELD_LDT_BITS,
+	MIG_FIELD_EMIG_INSERT_ID,
 
 	NUM_MIG_FIELDS
 } migrate_msg_fields;
@@ -124,20 +133,22 @@ typedef enum {
 #define OPERATION_START_ACK_OK 4
 #define OPERATION_START_ACK_EAGAIN 5
 #define OPERATION_START_ACK_FAIL 6
-#define OPERATION_START_ACK_ALREADY_DONE 7
+#define OPERATION_UNUSED_7 7 // deprecated
 #define OPERATION_DONE 8
 #define OPERATION_DONE_ACK 9
-#define OPERATION_CANCEL 10 // deprecated
+#define OPERATION_UNUSED_10 10 // deprecated
 #define OPERATION_MERGE_META 11
 #define OPERATION_MERGE_META_ACK 12
+#define OPERATION_ALL_DONE 13
+#define OPERATION_ALL_DONE_ACK 14
 
 #define MIG_INFO_LDT_PREC   0x0001
 #define MIG_INFO_LDT_SUBREC 0x0002
 #define MIG_INFO_LDT_ESR    0x0004
 #define MIG_INFO_TOMBSTONE  0x0008 // enterprise only
 
-#define MIG_FEATURE_MERGE 0x00000001
-#define MIG_FEATURES_SEEN 0x80000000 // needed for backward compatibility
+#define MIG_FEATURE_MERGE 0x00000001U
+#define MIG_FEATURES_SEEN 0x80000000U // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
 
 #define AS_PARTITION_MIG_TX_STATE_NONE 0
@@ -169,6 +180,7 @@ typedef struct emigration_s {
 	cf_node     dest;
 	uint64_t    cluster_key;
 	uint32_t    id;
+	emig_type	type;
 	uint32_t    tx_flags;
 	cf_atomic32 state;
 	bool        aborted;
@@ -176,6 +188,7 @@ typedef struct emigration_s {
 
 	cf_atomic32 bytes_emigrating;
 	shash       *reinsert_hash;
+	uint64_t    insert_id;
 	cf_queue    *ctrl_q;
 	emig_meta_q *meta_q;
 
@@ -217,8 +230,8 @@ typedef struct immigration_hkey_s {
 
 
 // Globals.
-extern rchash *g_emigration_hash;
-extern rchash *g_immigration_hash;
+extern cf_rchash *g_emigration_hash;
+extern cf_rchash *g_immigration_hash;
 
 
 // Emigration, immigration, & pickled record destructors.
@@ -239,7 +252,7 @@ bool immigration_ignore_pickle(const uint8_t *buf, const msg *m);
 void immigration_handle_meta_batch_ack(cf_node src, msg *m);
 
 // Meta sender.
-bool immigration_start_meta_sender(immigration *immig, uint32_t emig_features, uint32_t emig_n_recs);
+bool immigration_start_meta_sender(immigration *immig, uint32_t emig_features, uint64_t emig_n_recs);
 
 // Immigration meta queue.
 void immig_meta_q_init(immig_meta_q *imq);

@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h> // for alloca() only
 #include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
@@ -37,7 +38,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/datamodel.h"
 #include "base/ldt.h"
@@ -89,11 +90,10 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) == 0) {
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) == 0) {
 		as_record* r = r_ref.r;
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-		msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
 		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
 		as_record_done(&r_ref, ns);
@@ -185,14 +185,12 @@ dup_res_handle_request(cf_node node, msg* m)
 	}
 
 	uint32_t generation = 0;
-	bool local_conflict_check =
-			msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0;
-
-	uint32_t void_time = 0;
 	uint64_t last_update_time = 0;
 
-	msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+	bool local_conflict_check =
+			msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0 &&
+			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+					&last_update_time) == 0;
 
 	// Done reading message fields, may now set fields for ack.
 	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
@@ -200,7 +198,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_partition_reservation rsv;
 	AS_PARTITION_RESERVATION_INIT(rsv); // TODO - not really needed?
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
 	if (rsv.cluster_key != cluster_key) {
 		done_handle_request(&rsv, NULL);
@@ -211,7 +209,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(rsv.tree, keyd, &r_ref, ns) != 0) {
+	if (as_record_get(rsv.tree, keyd, &r_ref) != 0) {
 		done_handle_request(&rsv, NULL);
 		send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return;
@@ -221,8 +219,8 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	if (local_conflict_check &&
 			0 >= as_record_resolve_conflict(ns->conflict_resolution_policy,
-					generation, last_update_time, void_time,
-					r->generation, r->last_update_time, r->void_time)) {
+					generation, last_update_time, r->generation,
+					r->last_update_time)) {
 		done_handle_request(&rsv, &r_ref);
 		send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return;
@@ -242,7 +240,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	else {
 		as_storage_rd rd;
 
-		as_storage_record_open(ns, r, &rd, keyd);
+		as_storage_record_open(ns, r, &rd);
 
 		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
@@ -270,13 +268,21 @@ dup_res_handle_request(cf_node node, msg* m)
 
 		as_storage_record_get_key(&rd);
 
-		size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
-		uint8_t rec_props_data[rec_props_data_size];
+		const char* set_name = as_index_get_set_name(r, ns);
 
-		if (rec_props_data_size > 0) {
-			as_storage_record_set_rec_props(&rd, rec_props_data);
-			msg_set_buf(m, RW_FIELD_REC_PROPS, rd.rec_props.p_data,
-					rd.rec_props.size, MSG_SET_COPY);
+		if (set_name) {
+			msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+					strlen(set_name), MSG_SET_COPY);
+		}
+
+		if (rd.key) {
+			msg_set_buf(m, RW_FIELD_KEY, rd.key, rd.key_size, MSG_SET_COPY);
+		}
+
+		uint32_t ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
+
+		if (ldt_bits != 0) {
+			msg_set_uint32(m, RW_FIELD_LDT_BITS, ldt_bits);
 		}
 
 		as_storage_record_close(&rd);
@@ -285,13 +291,12 @@ dup_res_handle_request(cf_node node, msg* m)
 				MSG_SET_HANDOFF_MALLOC);
 	}
 
-	// Note - older versions expect RW_FIELD_VINFOSET, so must send it for now.
-	static const uint8_t VINFO_BUF_0[] = { 0, 0, 0, 0 };
-	msg_set_buf(m, RW_FIELD_VINFOSET, VINFO_BUF_0, 4, MSG_SET_COPY);
-
 	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-	msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
 	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
+
+	if (r->void_time != 0) {
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+	}
 
 	done_handle_request(&rsv, &r_ref);
 	send_dup_res_ack(node, m, AS_PROTO_RESULT_OK);
@@ -486,8 +491,7 @@ send_dup_res_ack(cf_node node, msg* m, uint32_t result)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -501,8 +505,7 @@ send_ack_for_bad_request(cf_node node, msg* m)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, AS_PROTO_RESULT_FAIL_UNKNOWN); // ???
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -511,7 +514,7 @@ send_ack_for_bad_request(cf_node node, msg* m)
 bool
 apply_winner(rw_request* rw)
 {
-	int n = 0;
+	uint32_t n = 0;
 	as_record_merge_component dups[rw->n_dest_nodes];
 
 	memset(dups, 0, sizeof(dups));
@@ -539,8 +542,13 @@ apply_winner(rw_request* rw)
 			continue;
 		}
 
+		if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+				&dups[n].last_update_time) != 0) {
+			cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: no last-update-time ");
+			continue;
+		}
+
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &dups[n].void_time);
-		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &dups[n].last_update_time);
 
 		if (rw->rsv.ns->ldt_enabled) {
 			get_ldt_info(m, &dups[n]);
@@ -562,11 +570,33 @@ apply_winner(rw_request* rw)
 			continue;
 		}
 
-		size_t rec_props_size = 0;
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
 
-		msg_get_buf(m, RW_FIELD_REC_PROPS, &dups[n].rec_props.p_data,
-				&rec_props_size, MSG_GET_DIRECT);
-		dups[n].rec_props.size = (uint32_t)rec_props_size;
+		msg_get_buf(m, RW_FIELD_SET_NAME, &set_name, &set_name_len,
+				MSG_GET_DIRECT);
+
+		uint8_t *key = NULL;
+		size_t key_size = 0;
+
+		msg_get_buf(m, RW_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+		uint32_t ldt_bits = 0;
+
+		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
+
+		size_t rec_props_data_size = as_rec_props_size_all(set_name,
+				set_name_len, key, key_size, ldt_bits);
+
+		if (rec_props_data_size != 0) {
+			// Use alloca() to last the scope of the function. Note that we're
+			// in a loop - stack usage is duplicates * rec-props data size.
+			dups[n].rec_props.p_data = alloca(rec_props_data_size);
+
+			as_rec_props_fill_all(&dups[n].rec_props,
+					dups[n].rec_props.p_data, set_name, set_name_len, key,
+					key_size, ldt_bits);
+		}
 
 		n++;
 	}

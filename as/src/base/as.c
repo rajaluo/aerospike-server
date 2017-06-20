@@ -1,7 +1,7 @@
 /*
  * as.c
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -36,13 +36,11 @@
 
 #include "citrusleaf/alloc.h"
 
-#include "ai.h"
+#include "daemon.h"
 #include "fault.h"
-#include "jem.h"
+#include "hardware.h"
 #include "tls.h"
-#include "util.h"
 
-#include "base/asm.h"
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -61,10 +59,11 @@
 #include "base/thr_tsvc.h"
 #include "base/ticker.h"
 #include "base/xdr_serverside.h"
+#include "fabric/clustering.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
-#include "fabric/paxos.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -80,18 +79,18 @@ extern const char aerospike_build_type[];
 extern const char aerospike_build_id[];
 
 // Command line options for the Aerospike server.
-const struct option cmd_opts[] = {
-		{ "help", no_argument, 0, 'h' },
-		{ "version", no_argument, 0, 'v' },
-		{ "config-file", required_argument, 0, 'f' },
-		{ "foreground", no_argument, 0, 'd' },
-		{ "fgdaemon", no_argument, 0, 'F' },
-		{ "cold-start", no_argument, 0, 'c' },
-		{ "instance", required_argument, 0, 'n' },
-		{ 0, 0, 0, 0 }
+static const struct option CMD_OPTS[] = {
+		{ "help", no_argument, NULL, 'h' },
+		{ "version", no_argument, NULL, 'v' },
+		{ "config-file", required_argument, NULL, 'f' },
+		{ "foreground", no_argument, NULL, 'd' },
+		{ "fgdaemon", no_argument, NULL, 'F' },
+		{ "cold-start", no_argument, NULL, 'c' },
+		{ "instance", required_argument, NULL, 'n' },
+		{ NULL, 0, NULL, 0 }
 };
 
-const char HELP[] =
+static const char HELP[] =
 		"\n"
 		"Aerospike server installation installs the script /etc/init.d/aerospike which\n"
 		"is normally used to start and stop the server. The script is also found as\n"
@@ -137,7 +136,7 @@ const char HELP[] =
 		"option.\n"
 		;
 
-const char USAGE[] =
+static const char USAGE[] =
 		"\n"
 		"asd informative command-line options:\n"
 		"[--help]\n"
@@ -151,15 +150,16 @@ const char USAGE[] =
 		"[--instance <0-15>]\n"
 		;
 
-const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
+static const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
+
+static const char SMD_DIR_NAME[] = "/smd";
 
 
 //==========================================================
 // Globals.
 //
 
-// The mutex that the main function deadlocks on after starting the service.
-pthread_mutex_t g_NONSTOP;
+pthread_mutex_t g_main_deadlock = PTHREAD_MUTEX_INITIALIZER;
 bool g_startup_complete = false;
 bool g_shutdown_started = false;
 
@@ -173,70 +173,9 @@ extern void as_signal_setup();
 extern void as_demarshal_start();
 extern void as_nsup_start();
 
-
-//==========================================================
-// Local helpers.
-//
-
-static void
-write_pidfile(char* pidfile)
-{
-	if (! pidfile) {
-		// If there's no pid file specified in the config file, just move on.
-		return;
-	}
-
-	// Note - the directory the pid file is in must already exist.
-
-	remove(pidfile);
-
-	int pid_fd = open(pidfile, O_CREAT | O_RDWR,
-			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-
-	if (pid_fd < 0) {
-		cf_crash_nostack(AS_AS, "failed to open pid file %s: %s", pidfile,
-				cf_strerror(errno));
-	}
-
-	char pidstr[16];
-	sprintf(pidstr, "%u\n", (uint32_t)getpid());
-
-	// If we can't access this resource, just log a warning and continue -
-	// it is not critical to the process.
-	if (-1 == write(pid_fd, pidstr, strlen(pidstr))) {
-		cf_warning(AS_AS, "failed write to pid file %s: %s", pidfile,
-				cf_strerror(errno));
-	}
-
-	close(pid_fd);
-}
-
-static void
-validate_directory(const char* path, const char* log_tag)
-{
-	struct stat buf;
-
-	if (stat(path, &buf) != 0) {
-		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: %s",
-				log_tag, path, cf_strerror(errno));
-	}
-	else if (! S_ISDIR(buf.st_mode)) {
-		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: Not a directory",
-				log_tag, path);
-	}
-}
-
-static void
-validate_smd_directory()
-{
-	size_t len = strlen(g_config.work_directory);
-	const char SMD_DIR_NAME[] = "/smd";
-	char smd_path[len + sizeof(SMD_DIR_NAME)];
-
-	strcpy(smd_path, g_config.work_directory);
-	strcpy(smd_path + len, SMD_DIR_NAME);
-	validate_directory(smd_path, "system metadata");
-}
+static void write_pidfile(char *pidfile);
+static void validate_directory(const char *path, const char *log_tag);
+static void validate_smd_directory();
 
 
 //==========================================================
@@ -248,26 +187,8 @@ main(int argc, char **argv)
 {
 	g_start_ms = cf_getms();
 
-#ifdef USE_ASM
-	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS];
-
-	// Zero-out the statically-allocated array of memory allocation locations.
-	memset(asm_array, 0, sizeof(asm_array));
-
-	// Set the ASMalloc callback user data.
-	g_my_cb_udata = asm_array;
-
-	// This must come first to allow initialization of the ASMalloc library.
-	asm_init();
-#endif // defined(USE_ASM)
-
-#ifdef USE_JEM
-	// Initialize the JEMalloc interface.
-	jem_init(true);
-#endif
-
-	// Initialize ref-counting system.
-	cf_rc_init(NULL);
+	// Initialize memory allocation.
+	cf_alloc_init();
 
 	// Initialize fault management framework.
 	cf_fault_init();
@@ -275,17 +196,11 @@ main(int argc, char **argv)
 	// Setup signal handlers.
 	as_signal_setup();
 
-	// Initialize the Jansson JSON API.
-	as_json_init();
-
-	// Start global stats at 0.
-	as_stats_init();
-
-	// Initialize the TLS library.
+	// Initialize TLS library.
 	tls_check_init();
-	
-	int i;
-	int cmd_optidx;
+
+	int opt;
+	int opt_i;
 	const char *config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
 	bool new_style_daemon = false;
@@ -293,8 +208,8 @@ main(int argc, char **argv)
 	uint32_t instance = 0;
 
 	// Parse command line options.
-	while (-1 != (i = getopt_long(argc, argv, "", cmd_opts, &cmd_optidx))) {
-		switch (i) {
+	while ((opt = getopt_long(argc, argv, "", CMD_OPTS, &opt_i)) != -1) {
+		switch (opt) {
 		case 'h':
 			// printf() since we want stdout and don't want cf_fault's prefix.
 			printf("%s\n", HELP);
@@ -342,18 +257,9 @@ main(int argc, char **argv)
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config *c = as_config_init(config_file);
 
-#ifdef USE_ASM
-	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
-
-	long initial_tid = syscall(SYS_gettid);
-#endif
-
-#ifdef MEM_COUNT
-	// [Note: This should ideally be at the very start of the "main()" function,
-	//        but we need to wait until after the config file has been parsed in
-	//        order to support run-time configurability.]
-	mem_count_init(c->memory_accounting ? MEM_COUNT_ENABLE : MEM_COUNT_DISABLE);
-#endif
+	// Detect NUMA topology and, if requested, prepare for CPU and NUMA pinning.
+	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance,
+			&c->service.bind);
 
 	// Perform privilege separation as necessary. If configured user & group
 	// don't have root privileges, all resources created or reopened past this
@@ -408,16 +314,6 @@ main(int argc, char **argv)
 		cf_process_daemonize(open_fds, num_open_fds);
 	}
 
-#ifdef USE_ASM
-	// Log the main thread's Linux Task ID (pre- and post-fork) to the console.
-	fprintf(stderr, "Initial main thread tid: %ld\n", initial_tid);
-
-	if (! run_in_foreground && c->run_as_daemon) {
-		fprintf(stderr, "Post-daemonize main thread tid: %lu\n",
-				syscall(SYS_gettid));
-	}
-#endif
-
 	// Log which build this is - should be the first line in the log file.
 	cf_info(AS_AS, "<><><><><><><><><><>  %s build %s  <><><><><><><><><><>",
 			aerospike_build_type, aerospike_build_id);
@@ -425,9 +321,7 @@ main(int argc, char **argv)
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
 
-	// Make one more pass for XDR-related config and crash if needed.
-	// TODO : XDR config parsing should be merged with main config parsing.
-	xdr_conf_init(config_file);
+	xdr_config_post_process();
 
 	// If we allocated a non-default config file name, free it.
 	if (config_file != DEFAULT_CONFIG_FILE) {
@@ -454,9 +348,9 @@ main(int argc, char **argv)
 	// starting worker threads, etc. (But no communication with other server
 	// nodes or clients yet.)
 
+	as_json_init();				// Jansson JSON API used by System Metadata
 	as_smd_init();				// System Metadata first - others depend on it
 	as_index_tree_gc_init();	// thread to purge dropped index trees
-	ai_init();					// before as_storage_init() populates indexes
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
 
 	// Initialize namespaces. Each namespace decides here whether it will do a
@@ -469,6 +363,9 @@ main(int argc, char **argv)
 	// defrag subsystem starts operating at the end of this call.
 	as_storage_init();
 
+	// Migrate memory to correct NUMA node (includes restored index arenas).
+	cf_topo_migrate_memory();
+
 	// Populate all secondary indexes. This may block for a long time.
 	as_sindex_boot_populateall();
 
@@ -479,8 +376,9 @@ main(int argc, char **argv)
 	as_tsvc_init();				// all transaction handling
 	as_hb_init();				// inter-node heartbeat
 	as_fabric_init();			// inter-node communications
+	as_exchange_init();			// initialize the cluster exchange subsystem
+	as_clustering_init();		// clustering-v5 start
 	as_info_init();				// info transaction handling
-	as_paxos_init();			// cluster consensus algorithm
 	as_migrate_init();			// move data between nodes
 	as_proxy_init();			// do work on behalf of others
 	as_rw_init();				// read & write service
@@ -499,11 +397,12 @@ main(int argc, char **argv)
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
-	as_smd_start(g_smd);		// enables receiving paxos state change events
+	as_smd_start(g_smd);		// enables receiving cluster state change events
 	as_fabric_start();			// may send & receive fabric messages
 	as_xdr_start();				// XDR should start before it joins other nodes
-	as_hb_start();				// start inter-node heatbeat
-	as_paxos_start();			// blocks until cluster membership is obtained
+	as_hb_start();				// start inter-node heartbeat
+	as_exchange_start();		// start the cluster exchange subsystem
+	as_clustering_start();		// clustering-v5 start
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
@@ -522,18 +421,17 @@ main(int argc, char **argv)
 
 	// Stop this thread from finishing. Intentionally deadlocking on a mutex is
 	// a remarkably efficient way to do this.
-	pthread_mutex_init(&g_NONSTOP, NULL);
-	pthread_mutex_lock(&g_NONSTOP);
+	pthread_mutex_lock(&g_main_deadlock);
 	g_startup_complete = true;
-	pthread_mutex_lock(&g_NONSTOP);
+	pthread_mutex_lock(&g_main_deadlock);
 
 	// When the service is running, you are here (deadlocked) - the signals that
 	// stop the service (yes, these signals always occur in this thread) will
 	// unlock the mutex, allowing us to continue.
 
 	g_shutdown_started = true;
-	pthread_mutex_unlock(&g_NONSTOP);
-	pthread_mutex_destroy(&g_NONSTOP);
+	pthread_mutex_unlock(&g_main_deadlock);
+	pthread_mutex_destroy(&g_main_deadlock);
 
 	//--------------------------------------------
 	// Received a shutdown signal.
@@ -554,4 +452,68 @@ main(int argc, char **argv)
 #endif
 
 	return 0;
+}
+
+
+//==========================================================
+// Local helpers.
+//
+
+static void
+write_pidfile(char *pidfile)
+{
+	if (! pidfile) {
+		// If there's no pid file specified in the config file, just move on.
+		return;
+	}
+
+	// Note - the directory the pid file is in must already exist.
+
+	remove(pidfile);
+
+	int pid_fd = open(pidfile, O_CREAT | O_RDWR,
+			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+
+	if (pid_fd < 0) {
+		cf_crash_nostack(AS_AS, "failed to open pid file %s: %s", pidfile,
+				cf_strerror(errno));
+	}
+
+	char pidstr[16];
+	sprintf(pidstr, "%u\n", (uint32_t)getpid());
+
+	// If we can't access this resource, just log a warning and continue -
+	// it is not critical to the process.
+	if (write(pid_fd, pidstr, strlen(pidstr)) == -1) {
+		cf_warning(AS_AS, "failed write to pid file %s: %s", pidfile,
+				cf_strerror(errno));
+	}
+
+	close(pid_fd);
+}
+
+static void
+validate_directory(const char *path, const char *log_tag)
+{
+	struct stat buf;
+
+	if (stat(path, &buf) != 0) {
+		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: %s",
+				log_tag, path, cf_strerror(errno));
+	}
+	else if (! S_ISDIR(buf.st_mode)) {
+		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: Not a directory",
+				log_tag, path);
+	}
+}
+
+static void
+validate_smd_directory()
+{
+	size_t len = strlen(g_config.work_directory);
+	char smd_path[len + sizeof(SMD_DIR_NAME)];
+
+	strcpy(smd_path, g_config.work_directory);
+	strcpy(smd_path + len, SMD_DIR_NAME);
+	validate_directory(smd_path, "system metadata");
 }

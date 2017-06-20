@@ -46,7 +46,6 @@
 #include "hist_track.h"
 #include "meminfo.h"
 
-#include "base/asm.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
@@ -55,10 +54,10 @@
 #include "base/thr_info.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/partition.h"
-#include "fabric/paxos.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -72,12 +71,13 @@ extern int as_nsup_queue_get_size();
 extern bool g_shutdown_started;
 
 void* run_ticker(void* arg);
-void log_ticker_frame();
+void log_ticker_frame(uint64_t delta_time);
 
 void log_line_system_memory();
 void log_line_in_progress();
 void log_line_fds();
 void log_line_heartbeat();
+void log_fabric_rate(uint64_t delta_time);
 void log_line_early_fail();
 void log_line_batch_index();
 
@@ -102,8 +102,6 @@ void log_line_retransmits(as_namespace* ns);
 
 void dump_global_histograms();
 void dump_namespace_histograms(as_namespace* ns);
-
-void log_mem_stats(size_t total_ns_memory_inuse);
 
 
 //==========================================================
@@ -140,9 +138,9 @@ run_ticker(void* arg)
 		nanosleep(&delay, NULL);
 
 		uint64_t curr_time = cf_getns();
+		uint64_t delta_time = curr_time - last_time;
 
-		if (curr_time - last_time <
-				(uint64_t)g_config.ticker_interval * 1000000000) {
+		if (delta_time < (uint64_t)g_config.ticker_interval * 1000000000) {
 			continue; // period has not been reached for showing a frame
 		}
 
@@ -153,7 +151,7 @@ run_ticker(void* arg)
 			break;
 		}
 
-		log_ticker_frame();
+		log_ticker_frame(delta_time);
 	}
 
 	return NULL;
@@ -161,17 +159,18 @@ run_ticker(void* arg)
 
 
 void
-log_ticker_frame()
+log_ticker_frame(uint64_t delta_time)
 {
 	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u",
 			g_config.self_node,
-			g_paxos->cluster_size
+			as_exchange_cluster_size()
 			);
 
 	log_line_system_memory();
 	log_line_in_progress();
 	log_line_fds();
 	log_line_heartbeat();
+	log_fabric_rate(delta_time);
 	log_line_early_fail();
 	log_line_batch_index();
 
@@ -195,7 +194,7 @@ log_ticker_frame()
 		total_ns_memory_inuse += total_mem;
 
 		repl_stats mp;
-		as_partition_get_master_prole_stats(ns, &mp);
+		as_partition_get_replica_stats(ns, &mp);
 
 		log_line_objects(ns, n_objects, &mp);
 		log_line_sub_objects(ns, n_sub_objects, &mp);
@@ -215,11 +214,11 @@ log_ticker_frame()
 		dump_namespace_histograms(ns);
 	}
 
-	log_mem_stats(total_ns_memory_inuse);
-
 	if (g_config.fabric_dump_msgs) {
 		as_fabric_msg_queue_dump();
 	}
+
+	cf_dump_ticker_cache();
 }
 
 
@@ -237,8 +236,8 @@ log_line_system_memory()
 	size_t mapped_kbytes;
 	double efficiency_pct;
 
-	cf_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
-			&efficiency_pct);
+	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
+			&efficiency_pct, NULL);
 
 	cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
 			freemem / 1024,
@@ -296,6 +295,36 @@ log_line_heartbeat()
 
 
 void
+log_fabric_rate(uint64_t delta_time)
+{
+	fabric_rate rate = { { 0 } };
+
+	as_fabric_rate_capture(&rate);
+
+	uint64_t dt_sec = delta_time / 1000000000;
+
+	if (dt_sec < 1) {
+		dt_sec = 1;
+	}
+
+	g_stats.fabric_bulk_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_BULK] / dt_sec;
+	g_stats.fabric_bulk_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_BULK] / dt_sec;
+	g_stats.fabric_ctrl_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_CTRL] / dt_sec;
+	g_stats.fabric_ctrl_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_CTRL] / dt_sec;
+	g_stats.fabric_meta_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_META] / dt_sec;
+	g_stats.fabric_meta_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_META] / dt_sec;
+	g_stats.fabric_rw_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_RW] / dt_sec;
+	g_stats.fabric_rw_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_RW] / dt_sec;
+
+	cf_info(AS_INFO, "   fabric-bytes-per-second: bulk (%lu,%lu) ctrl (%lu,%lu) meta (%lu,%lu) rw (%lu,%lu)",
+			g_stats.fabric_bulk_s_rate, g_stats.fabric_bulk_r_rate,
+			g_stats.fabric_ctrl_s_rate, g_stats.fabric_ctrl_r_rate,
+			g_stats.fabric_meta_s_rate, g_stats.fabric_meta_r_rate,
+			g_stats.fabric_rw_s_rate, g_stats.fabric_rw_r_rate);
+}
+
+
+void
 log_line_early_fail()
 {
 	uint64_t n_demarshal = g_stats.n_demarshal_error;
@@ -340,11 +369,12 @@ void
 log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 {
 	// TODO - show if all 0's ???
-	cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu",
+	cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu non-replica %lu",
 			ns->name,
 			n_objects,
 			mp->n_master_objects,
-			mp->n_prole_objects
+			mp->n_prole_objects,
+			mp->n_non_replica_objects
 			);
 }
 
@@ -354,15 +384,17 @@ log_line_sub_objects(as_namespace* ns, uint64_t n_sub_objects, repl_stats* mp)
 {
 	if ((n_sub_objects |
 			mp->n_master_sub_objects |
-			mp->n_prole_sub_objects) == 0) {
+			mp->n_prole_sub_objects |
+			mp->n_non_replica_sub_objects) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
+	cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu non-replica %lu",
 			ns->name,
 			n_sub_objects,
 			mp->n_master_sub_objects,
-			mp->n_prole_sub_objects
+			mp->n_prole_sub_objects,
+			mp->n_non_replica_sub_objects
 			);
 }
 
@@ -372,15 +404,17 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 {
 	if ((n_tombstones |
 			mp->n_master_tombstones |
-			mp->n_prole_tombstones) == 0) {
+			mp->n_prole_tombstones |
+			mp->n_non_replica_tombstones) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} tombstones: all %lu master %lu prole %lu",
+	cf_info(AS_INFO, "{%s} tombstones: all %lu master %lu prole %lu non-replica %lu",
 			ns->name,
 			n_tombstones,
 			mp->n_master_tombstones,
-			mp->n_prole_tombstones
+			mp->n_prole_tombstones,
+			mp->n_non_replica_tombstones
 			);
 }
 
@@ -388,20 +422,20 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 void
 log_line_migrations(as_namespace* ns)
 {
-	int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
 	int64_t initial_tx = (int64_t)ns->migrate_tx_partitions_initial;
-	int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
+	int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
 	int64_t remaining_tx = (int64_t)ns->migrate_tx_partitions_remaining;
-	int64_t initial = initial_rx + initial_tx;
-	int64_t remaining = remaining_rx + remaining_tx;
+	int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
+	int64_t initial = initial_tx + initial_rx;
+	int64_t remaining = remaining_tx + remaining_rx;
 
 	if (initial > 0 && remaining > 0) {
 		float complete_pct = (1 - ((float)remaining / (float)initial)) * 100;
 
-		cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
+		cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld,%ld) active (%ld,%ld,%ld) complete-pct %0.2f",
 				ns->name,
-				remaining_tx, remaining_rx,
-				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active,
+				remaining_tx, remaining_rx, ns->migrate_signals_remaining,
+				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active, ns->migrate_signals_active,
 				complete_pct
 				);
 	}
@@ -719,14 +753,25 @@ dump_global_histograms()
 	}
 
 	if (g_config.fabric_benchmarks_enabled) {
-		histogram_dump(g_stats.fabric_send_init_hist);
-		histogram_dump(g_stats.fabric_send_fragment_hist);
-		histogram_dump(g_stats.fabric_recv_fragment_hist);
-		histogram_dump(g_stats.fabric_recv_cb_hist);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
 	}
 
 	as_query_histogram_dumpall();
-	as_sindex_gc_histogram_dumpall();
 
 	if (g_config.ldt_benchmarks) {
 		histogram_dump(g_stats.ldt_multiop_prole_hist);
@@ -813,71 +858,4 @@ dump_namespace_histograms(as_namespace* ns)
 	}
 
 	as_sindex_histogram_dumpall(ns);
-}
-
-
-void
-log_mem_stats(size_t total_ns_memory_inuse)
-{
-#ifdef MEM_COUNT
-	if (g_config.memory_accounting) {
-		mem_count_stats();
-	}
-#endif
-
-#ifdef USE_ASM
-	if (g_asm_hook_enabled) {
-		static uint64_t iter = 0;
-		static asm_stats_t* asm_stats = NULL;
-		static vm_stats_t* vm_stats = NULL;
-		size_t vm_size = 0;
-		size_t total_accounted_memory = 0;
-
-		as_asm_hook((void*)iter++, &asm_stats, &vm_stats);
-
-		if (asm_stats) {
-#ifdef DEBUG_ASM
-			fprintf(stderr, "***THR_INFO:  asm:  mem_count: %lu ; net_mmaps: %lu ; net_shm: %lu***\n",
-					asm_stats->mem_count, asm_stats->net_mmaps, asm_stats->net_shm);
-#endif
-			total_accounted_memory = asm_stats->mem_count + asm_stats->net_mmaps + asm_stats->net_shm;
-		}
-
-		if (vm_stats) {
-			// N.B.: The VM stats description is used implicitly by the accessor
-			// "vm_stats_*()" macros!
-			vm_stats_desc_t* vm_stats_desc = vm_stats->desc;
-			vm_size = vm_stats_get_key_value(vm_stats, VM_SIZE);
-#ifdef DEBUG_ASM
-			fprintf(stderr, "***THR_INFO:  vm:  %s: %lu KB; %s: %lu KB ; %s: %lu KB ; %s: %lu KB***\n",
-					vm_stats_key_name(VM_PEAK),
-					vm_stats_get_key_value(vm_stats, VM_PEAK),
-					vm_stats_key_name(VM_SIZE),
-					vm_size,
-					vm_stats_key_name(VM_RSS),
-					vm_stats_get_key_value(vm_stats, VM_RSS),
-					vm_stats_key_name(VM_DATA),
-					vm_stats_get_key_value(vm_stats, VM_DATA));
-#endif
-
-			// Convert from KB to B.
-			vm_size *= 1024;
-
-			// Calculate the storage efficiency percentages.
-			double dynamic_eff = ((double) total_accounted_memory / (double) MAX(vm_size, 1)) * 100.0;
-			double obj_eff = ((double) total_ns_memory_inuse / (double) MAX(vm_size, 1)) * 100.0;
-
-#ifdef DEBUG_ASM
-			fprintf(stderr, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)\n",
-					vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-#endif
-			cf_info(AS_INFO, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)",
-					vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-		}
-	}
-#endif // USE_ASM
-
-	if (g_mstats_enabled) {
-		info_log_with_datestamp(malloc_stats);
-	}
 }

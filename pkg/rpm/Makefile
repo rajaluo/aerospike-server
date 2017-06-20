@@ -44,6 +44,7 @@ ifeq ($(USE_SYSTEMD),1)
 endif
 	install -pm 755 $(DEPTH)/tools/citrus2aero/upgrade2to3 $(BUILD_ROOT)/usr/bin/asmigrate2to3
 	install -pm 755 $(DEPTH)/tools/fixownership/fixownership.py $(BUILD_ROOT)/usr/bin/asfixownership
+	install -pm 755 $(DEPTH)/as/etc/irqbalance-ban.sh $(BUILD_ROOT)/etc/aerospike/irqbalance-ban.sh
 	install -pm 644 $(DEPTH)/as/etc/aerospike$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
 	cat $(DEPTH)/as/etc/README.sample.conf.md > $(BUILD_ROOT)/etc/aerospike/sample/README.md
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
@@ -103,14 +104,6 @@ endif
 	install -pm 644 $(DEPTH)/modules/lua-core/src/external/* $(OPT_AS)/sys/udf/lua/external
 	install -pm 644 $(DEPTH)/modules/lua-core/src/ldt/* $(OPT_AS)/sys/udf/lua/ldt
 
-ifeq ($(USE_ASM),1)
-	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
-	install -d $(OPT_AS)/{bin,lib}
-	install -pm 755 $(DEPTH)/as/etc/run-under-gdb $(OPT_AS)/bin
-	install -pm 644 $(DEPTH)/modules/asmalloc/lib/asmalloc.jem.so $(OPT_AS)/lib
-	install -pm 644 $(DEPTH)/modules/jemalloc/lib/libjemalloc.so $(OPT_AS)/lib
-endif
-
 package:
 	install -d $(SOURCE_ROOT)/RPMS/x86_64
 
@@ -125,9 +118,6 @@ else
 	cat $(PKG)/rpm/server-spec-sysv >> $(PKG)/rpm/aerospike.spec
 endif
 
-ifeq ($(USE_ASM),1)
-	cat $(PKG)/rpm/asm-files >> $(PKG)/rpm/aerospike.spec
-endif
 ifeq ($(USE_EE),1)
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif

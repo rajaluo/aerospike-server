@@ -621,7 +621,7 @@ output_header(cf_hist_track* this, uint32_t start_ts, uint32_t num_cols,
 
 	for (int i = 0; i < num_cols; i++) {
 		write_p += snprintf(write_p, end_p - write_p, pcts_fmt,
-				1 << this->buckets[i]);
+				(uint32_t)(1 << this->buckets[i]));
 	}
 
 	*write_p++ = line_sep;

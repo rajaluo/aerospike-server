@@ -36,11 +36,11 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_rchash.h"
 
 #include "fault.h"
 #include "msg.h"
-#include "rchash.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -66,32 +66,35 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_GENERATION, M_FT_UINT32 },
 		{ RW_FIELD_DIGEST, M_FT_BUF },
 		{ RW_FIELD_VINFOSET, M_FT_BUF },
-		{ RW_FIELD_AS_MSG, M_FT_BUF },
+		{ RW_FIELD_UNUSED_7, M_FT_BUF },
 		{ RW_FIELD_CLUSTER_KEY, M_FT_UINT64 },
 		{ RW_FIELD_RECORD, M_FT_BUF },
 		{ RW_FIELD_TID, M_FT_UINT32 },
 		{ RW_FIELD_VOID_TIME, M_FT_UINT32 },
 		{ RW_FIELD_INFO, M_FT_UINT32 },
-		{ RW_FIELD_REC_PROPS, M_FT_BUF },
+		{ RW_FIELD_UNUSED_13, M_FT_BUF },
 		{ RW_FIELD_MULTIOP, M_FT_BUF },
 		{ RW_FIELD_LDT_VERSION, M_FT_UINT64 },
-		{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 }
+		{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
+		{ RW_FIELD_SET_NAME, M_FT_BUF },
+		{ RW_FIELD_KEY, M_FT_BUF },
+		{ RW_FIELD_LDT_BITS, M_FT_UINT32 }
 };
 
 COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
-#define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
+#define RW_MSG_SCRATCH_SIZE 192
 
 
 //==========================================================
 // Forward Declarations.
 //
 
-uint32_t rw_request_hash_fn(void* value, uint32_t value_len);
+uint32_t rw_request_hash_fn(const void* value, uint32_t value_len);
 transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
 
 void* run_retransmit(void* arg);
-int retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata);
+int retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata);
 void update_retransmit_stats(const rw_request* rw);
 
 int rw_msg_cb(cf_node id, msg* m, void* udata);
@@ -101,7 +104,7 @@ int rw_msg_cb(cf_node id, msg* m, void* udata);
 // Globals.
 //
 
-static rchash* g_rw_request_hash = NULL;
+static cf_rchash* g_rw_request_hash = NULL;
 
 
 //==========================================================
@@ -111,8 +114,9 @@ static rchash* g_rw_request_hash = NULL;
 void
 as_rw_init()
 {
-	rchash_create(&g_rw_request_hash, rw_request_hash_fn, rw_request_hdestroy,
-			sizeof(rw_request_hkey), 32 * 1024, RCHASH_CR_MT_MANYLOCK);
+	cf_rchash_create(&g_rw_request_hash, rw_request_hash_fn,
+			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024,
+			CF_RCHASH_CR_MT_MANYLOCK);
 
 	pthread_t thread;
 	pthread_attr_t attrs;
@@ -132,7 +136,7 @@ as_rw_init()
 uint32_t
 rw_request_hash_count()
 {
-	return rchash_get_size(g_rw_request_hash);
+	return cf_rchash_get_size(g_rw_request_hash);
 }
 
 
@@ -142,25 +146,25 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 {
 	int insert_rv;
 
-	while ((insert_rv = rchash_put_unique(g_rw_request_hash, hkey,
-			sizeof(*hkey), rw)) != RCHASH_OK) {
+	while ((insert_rv = cf_rchash_put_unique(g_rw_request_hash, hkey,
+			sizeof(*hkey), rw)) != CF_RCHASH_OK) {
 
-		if (insert_rv != RCHASH_ERR_FOUND) {
+		if (insert_rv != CF_RCHASH_ERR_FOUND) {
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN; // malloc failure
 			return TRANS_DONE_ERROR;
 		}
 		// else - rw_request with this digest already in hash - get it.
 
 		rw_request* rw0;
-		int get_rv = rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
+		int get_rv = cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
 				(void**)&rw0);
 
-		if (get_rv == RCHASH_ERR_NOTFOUND) {
+		if (get_rv == CF_RCHASH_ERR_NOTFOUND) {
 			// Try insertion again immediately.
 			continue;
 		}
 		// else - got it - handle "hot key" scenario.
-		cf_assert(get_rv == RCHASH_OK, AS_RW, "rchash_get error");
+		cf_assert(get_rv == CF_RCHASH_OK, AS_RW, "cf_rchash_get error");
 
 		pthread_mutex_lock(&rw0->lock);
 
@@ -179,7 +183,7 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 void
 rw_request_hash_delete(rw_request_hkey* hkey, rw_request* rw)
 {
-	rchash_delete_object(g_rw_request_hash, hkey, sizeof(*hkey), rw);
+	cf_rchash_delete_object(g_rw_request_hash, hkey, sizeof(*hkey), rw);
 }
 
 
@@ -188,7 +192,7 @@ rw_request_hash_get(rw_request_hkey* hkey)
 {
 	rw_request* rw = NULL;
 
-	rchash_get(g_rw_request_hash, hkey, sizeof(*hkey), (void**)&rw);
+	cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey), (void**)&rw);
 
 	return rw;
 }
@@ -208,14 +212,11 @@ rw_request_hash_dump()
 //
 
 uint32_t
-rw_request_hash_fn(void* value, uint32_t value_len)
+rw_request_hash_fn(const void* key, uint32_t key_size)
 {
-	rw_request_hkey* hkey = (rw_request_hkey*)value;
+	rw_request_hkey* hkey = (rw_request_hkey*)key;
 
-	// TODO - surely this can be simpler, use 4 bytes???
-	return	(hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE1] << 16) |
-			(hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE2] << 8) |
-			(hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE3]);
+	return *(uint32_t*)&hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE1];
 }
 
 
@@ -273,7 +274,7 @@ run_retransmit(void* arg)
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
+		cf_rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
 	}
 
 	return NULL;
@@ -281,7 +282,7 @@ run_retransmit(void* arg)
 
 
 int
-retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
+retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata)
 {
 	rw_request* rw = data;
 	now_times* now = (now_times*)udata;
@@ -297,17 +298,20 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 
 		pthread_mutex_unlock(&rw->lock);
 
-		return RCHASH_REDUCE_DELETE;
+		return CF_RCHASH_REDUCE_DELETE;
 	}
 
 	if (rw->xmit_ms < now->now_ms) {
 		pthread_mutex_lock(&rw->lock);
 
-		rw->xmit_ms = now->now_ms + rw->retry_interval_ms;
-		rw->retry_interval_ms *= 2;
+		if (rw->from.any) {
+			rw->xmit_ms = now->now_ms + rw->retry_interval_ms;
+			rw->retry_interval_ms *= 2;
 
-		send_rw_messages(rw);
-		update_retransmit_stats(rw);
+			send_rw_messages(rw);
+			update_retransmit_stats(rw);
+		}
+		// else - lost race against dup-res or repl-write callback.
 
 		pthread_mutex_unlock(&rw->lock);
 	}
@@ -319,6 +323,11 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 void
 update_retransmit_stats(const rw_request* rw)
 {
+	// Note - rw->msgp can be null if it's a ship-op.
+	if (! rw->msgp) {
+		return;
+	}
+
 	as_namespace* ns = rw->rsv.ns;
 	as_msg* m = &rw->msgp->msg;
 	bool is_dup_res = rw->repl_write_cb == NULL;

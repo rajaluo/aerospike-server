@@ -1,7 +1,7 @@
 /*
  * socket.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -31,9 +31,10 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
+#include "fault.h"
 #include "msg.h"
+#include "node.h"
 #include "tls_mode.h"
-#include "util.h"
 
 // Use forward declaration instead of including openssl/ssl.h here.
 typedef struct ssl_st SSL;
@@ -320,6 +321,7 @@ CF_MUST_CHECK int32_t cf_inter_get_addr_def_legacy(cf_ip_addr *addrs, uint32_t *
 CF_MUST_CHECK int32_t cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name);
 bool cf_inter_is_inter_name(const char *if_name);
 CF_MUST_CHECK int32_t cf_inter_addr_to_index_and_name(const cf_ip_addr *addr, int32_t *index, char **name);
+void cf_inter_expand_bond(const char *if_name, char **out_names, uint32_t *n_out);
 CF_MUST_CHECK int32_t cf_inter_mtu(const cf_ip_addr *inter_addr);
 CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
 bool cf_inter_detect_changes(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit);

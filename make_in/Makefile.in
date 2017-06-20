@@ -12,16 +12,7 @@ include $(DEPTH)/make_in/Makefile.vars
 CF_INCLUDE_DIR = $(DEPTH)/common/src/include
 CF_LIB_DIR     = $(DEPTH)/common/target/$(PLATFORM)/lib
 
-XDR_INCLUDE_DIR = $(DEPTH)/xdr/include
-XDR_LIB_DIR     = $(DEPTH)/xdr/lib
-
-KV_INCLUDE_DIR = /usr/local/include
-KV_LIB_DIR     = /usr/local/lib64
-
 AS_CFLAGS += -D_FILE_OFFSET_BITS=64 -std=gnu99 -D_REENTRANT -D_GNU_SOURCE
-
-# Enable ASMalloc debugging messages:
-AS_CFLAGS += -DDEBUG_ASM
 
 # Use the enhanced memory allocator (rather than the default version in the Common module.)
 AS_CFLAGS += -DENHANCED_ALLOC
@@ -30,55 +21,12 @@ LIBRARIES += -lcrypto
 
 LIBRARIES += -lpthread -lrt -ldl -lz -lm
 
-# State variables determining phase of macroexpansion during the build:
-#   MExp Phase 0 ==> No macro expansion (the default.)
-#   MExp Phase 1 ==> Expand macros using "m4".
-#   MExp Phase 2 ==> Final build using the macro-expanded source code.
-MEXP_PHASE = 0
-
 # Location of source files being compiled:
 #   "" (the default) means "src".  Automatically set to "../m4/" during non-zero macro expansion build phases.
 SRCDIR =
 
-ifeq ($(MEM_COUNT),1)
-  AS_CFLAGS += -DMEM_COUNT
-endif
-
-ifeq ($(USE_DF_DETECT),1)
-  ifneq ($(USE_ASM),1)
-    $(error Please build with ASMalloc support also to enable Double "free()" Detection)
-  endif
-  AS_CFLAGS += -DUSE_DF_DETECT
-endif
-
-ifeq ($(USE_ASM),1)
-  AS_CFLAGS += -DUSE_ASM
-  INCLUDES += -I$(ASMALLOC)/include
-endif
-
-ifeq ($(USE_JEM),1)
-  AS_CFLAGS += -DUSE_JEM
-  INCLUDES += -I$(JEMALLOC)/include
-  ifeq ($(LD_JEM),static)
-    LIBRARIES := $(JEMALLOC)/lib/libjemalloc.a $(LIBRARIES)
-  else
-    LIBRARIES := -L$(JEMALLOC)/lib -ljemalloc $(LIBRARIES)
-  endif
-endif
-
-PREPRO_SUFFIX = .cpp
-ifeq ($(PREPRO),1)
-  SUFFIX = $(PREPRO_SUFFIX)
-  AS_CFLAGS += -E -DPREPRO=$(PREPRO) -DGEN_TAG=$(GEN_TAG)"\
-"
-endif
-
-ifeq ($(WRAP),1)
-  CFLAGS += -DWRAP_MALLOC
-  # Alternative syntax for the wrapping flags:
-  # WRAPFLAGS = -Xlinker -wrap=calloc -Xlinker -wrap=malloc -Xlinker -wrap=realloc
-  WRAPFLAGS = -Wl,-wrap=calloc,-wrap=malloc,-wrap=free,-wrap=realloc,-wrap=strdup,-wrap=strndup,-wrap=posix_memalign
-endif
+INCLUDES += -I$(JEMALLOC)/include
+LIBRARIES := $(JEMALLOC)/lib/libjemalloc.a $(LIBRARIES)
 
 # Popular values:
 #   x86_64 for 64-bit Intel
@@ -130,6 +78,9 @@ endif
 # Generate dependency files.
 COMMON_CFLAGS += -MMD
 
+# Require strict warning-free compilation.
+COMMON_CFLAGS += -Werror
+
 CFLAGS = $(COMMON_CFLAGS) -DMARCH_$(MARCH_NATIVE)
 
 # Define a macro for the base source file name.
@@ -141,9 +92,6 @@ DEF_FN += -D__FILENAME__=\"$(notdir $<)\"
 #CFLAGS_64 = $(COMMON_FLAGS) -DMARCH_x86_64
 #CFLAGS_32 = $(COMMON_CFLAGS) -DMARCH_i686
 
-LDFLAGS = -rdynamic -L$(CF_LIB_DIR) -L$(XDR_LIB_DIR) $(WRAPFLAGS)
-ifeq ($(USE_KV),1)
-  LDFLAGS += -L$(KV_LIB_DIR)
-endif
+LDFLAGS = -rdynamic -L$(CF_LIB_DIR)
 
 STRIP = strip -p -v -s

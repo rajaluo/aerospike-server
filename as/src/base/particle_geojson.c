@@ -134,7 +134,6 @@ typedef struct geojson_flat_s {
 //
 
 static bool geojson_match(bool particle_is_region, uint64_t particle_cellid, geo_region_t particle_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict);
-static char const *geojson_mem_jsonstr(geojson_mem *p_geojson_mem, size_t *p_jsonsz);
 static inline uint32_t geojson_size(uint32_t n_cells, size_t string_size);
 
 
@@ -331,10 +330,8 @@ geojson_from_asval(const as_val *val, as_particle **pp)
 as_val *
 geojson_to_asval(const as_particle *p)
 {
-	geojson_mem *p_geojson_mem = (geojson_mem *)p;
-
 	size_t jsonsz;
-	char const *jsonptr = geojson_mem_jsonstr(p_geojson_mem, &jsonsz);
+	char const *jsonptr = as_geojson_mem_jsonstr(p, &jsonsz);
 	char *buf = cf_malloc(jsonsz + 1);
 
 	if (! buf) {
@@ -463,7 +460,7 @@ as_particle_geojson_match(as_particle *particle, uint64_t query_cellid, geo_regi
 	//
 	if (query_cellid != 0 && candidate_is_region && is_strict) {
 		size_t jsonsz;
-		char const *jsonptr = geojson_mem_jsonstr(gp, &jsonsz);
+		char const *jsonptr = as_geojson_mem_jsonstr(particle, &jsonsz);
 
 		if (! geo_parse(NULL, jsonptr, jsonsz, &candidate_cellid,
 				&candidate_region)) {
@@ -516,6 +513,18 @@ as_particle_geojson_match_asval(const as_val *val, uint64_t query_cellid, geo_re
 	geo_region_destroy(candidate_region);
 
 	return ismatch;
+}
+
+char const *
+as_geojson_mem_jsonstr(as_particle const *particle, size_t *p_jsonsz)
+{
+	geojson_mem *p_geojson_mem = (geojson_mem *)particle;
+
+	size_t cellsz = p_geojson_mem->ncells * sizeof(uint64_t);
+
+	*p_jsonsz = p_geojson_mem->sz - sizeof(uint8_t) - sizeof(uint16_t) - cellsz;
+
+	return (char const *)p_geojson_mem->data + cellsz;
 }
 
 
@@ -582,17 +591,6 @@ geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t 
 	}
 
 	return false;
-}
-
-static char const *
-geojson_mem_jsonstr(geojson_mem *p_geojson_mem, size_t *p_jsonsz)
-{
-	// Map the point.
-	size_t cellsz = p_geojson_mem->ncells * sizeof(uint64_t);
-
-	*p_jsonsz = p_geojson_mem->sz - sizeof(uint8_t) - sizeof(uint16_t) - cellsz;
-
-	return (char const *)p_geojson_mem->data + cellsz;
 }
 
 static inline uint32_t

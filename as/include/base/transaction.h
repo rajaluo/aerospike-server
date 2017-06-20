@@ -34,8 +34,8 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "msg.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
 
 #include "base/cfg.h"
 #include "base/index.h"
@@ -299,6 +299,18 @@ static inline bool
 as_transaction_has_scan_options(const as_transaction *tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SCAN_OPTIONS) != 0;
+}
+
+static inline bool
+as_transaction_has_socket_timeout(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_SOCKET_TIMEOUT) != 0;
+}
+
+static inline bool
+as_transaction_has_predexp(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_PREDEXP) != 0;
 }
 
 // For now it's not worth storing the trid in the as_transaction struct since we

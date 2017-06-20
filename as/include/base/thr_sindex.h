@@ -40,21 +40,6 @@
 #include "base/datamodel.h"
 #include "base/monitor.h"
 
-#define SET_TIME_FOR_SINDEX_GC_HIST(start_time)                                           \
-do {                                                                                      \
-	if (g_config.sindex_gc_enable_histogram) {                                            \
-		start_time = cf_getns();                                                          \
-	}                                                                                     \
-} while(0);
-
-#define SINDEX_GC_HIST_INSERT_DATA_POINT(type, start_time_ns)                             \
-do {                                                                                      \
-	if (start_time_ns != 0 && g_config.sindex_gc_enable_histogram && g_stats._ ##type) {  \
-		histogram_insert_data_point(g_stats._ ##type, start_time_ns);                     \
-	}                                                                                     \
-} while(0);
-
-
 #define SINDEX_GC_QUEUE_HIGHWATER  10
 #define SINDEX_GC_NUM_OBJS_PER_ARR 20
 
@@ -82,7 +67,6 @@ extern bool      g_sindex_boot_done;
 void as_sindex_thr_init();
 void as_sindex_gc_histogram_dumpall();
 objs_to_defrag_arr * as_sindex_gc_get_defrag_arr(void);
-void as_sindex_initiate_set_delete(as_namespace * ns, as_set * set);
 
 #define MAX_SINDEX_BUILDER_THREADS 32
 

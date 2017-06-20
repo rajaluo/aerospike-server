@@ -92,6 +92,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include <sys/time.h>
 
 #include "aerospike/as_buffer.h"
@@ -106,8 +107,8 @@
 #include "aerospike/as_val.h"
 #include "aerospike/mod_lua.h"
 #include "citrusleaf/cf_ll.h"
+#include "citrusleaf/cf_rchash.h"
 
-#include "ai.h"
 #include "ai_btree.h"
 #include "bt.h"
 #include "bt_iterator.h"
@@ -115,6 +116,7 @@
 #include "base/aggr.h"
 #include "base/as_stap.h"
 #include "base/datamodel.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/stats.h"
@@ -172,6 +174,7 @@ typedef struct as_query_transaction_s {
 	as_sindex              * si;
 	as_sindex_range        * srange;
 	query_type               job_type;  // Job type [LOOKUP/AGG/UDF]
+	predexp_eval_t         * predexp_eval;
 	cf_vector              * binlist;
 	as_file_handle         * fd_h;      // ref counted nonetheless
 	/************************** Run Time Data *********************************/
@@ -296,7 +299,7 @@ typedef struct qtr_skey_s {
 static int              g_current_queries_count = 0;
 static pthread_rwlock_t g_query_lock
 						= PTHREAD_RWLOCK_WRITER_NONRECURSIVE_INITIALIZER_NP;
-static rchash         * g_query_job_hash = NULL;
+static cf_rchash      * g_query_job_hash = NULL;
 // Buf Builder Pool
 static cf_queue       * g_query_response_bb_pool  = 0;
 static cf_queue       * g_query_qwork_pool         = 0;
@@ -801,21 +804,23 @@ query_teardown(as_query_transaction *qtr)
 	if (qtr->si)          AS_SINDEX_RELEASE(qtr->si);
 	if (qtr->binlist)     cf_vector_destroy(qtr->binlist);
 	if (qtr->setname)     cf_free(qtr->setname);
+	if (qtr->predexp_eval) predexp_destroy(qtr->predexp_eval);
 	if (qtr->job_type == QUERY_TYPE_AGGR && qtr->agg_call.def.arglist) {
 		as_list_destroy(qtr->agg_call.def.arglist);
 	}
-	else if (qtr->job_type == QUERY_TYPE_UDF_BG && qtr->origin.def.arglist) {
-		as_list_destroy(qtr->origin.def.arglist);
+	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+		iudf_origin_destroy(&qtr->origin);
 	}
 	pthread_mutex_destroy(&qtr->slock);
 }
 
 static void
-query_release_fd(as_query_transaction *qtr)
+query_release_fd(as_file_handle *fd_h, bool force_close)
 {
-	if (qtr && qtr->fd_h) {
-		as_end_of_transaction(qtr->fd_h, qtr_is_abort(qtr));
-		qtr->fd_h = NULL;
+	if (fd_h) {
+		fd_h->fh_info &= ~FH_INFO_DONOT_REAP;                                  
+		fd_h->last_used = cf_getms();                   
+		as_end_of_transaction(fd_h, force_close);
 	}
 }
 
@@ -832,15 +837,16 @@ query_transaction_done(as_query_transaction *qtr)
 
 	ASD_QUERY_TRANS_DONE(nodeid, qtr->trid, (void *) qtr);
 
-
 	if (qtr_started(qtr)) {
 		query_run_teardown(qtr);
 	}
 
 
-	query_release_fd(qtr);
+	// if query is aborted force close connection.
+	// Not to be reused
+	query_release_fd(qtr->fd_h, qtr_is_abort(qtr));
+	qtr->fd_h = NULL;
 	query_teardown(qtr);
-
 
 	ASD_QUERY_QTR_FREE(nodeid, qtr->trid, (void *) qtr);
 
@@ -1070,7 +1076,7 @@ hash_put_qtr(as_query_transaction * qtr)
 		return AS_QUERY_CONTINUE;
 	}
 
-	int rc = rchash_put_unique(g_query_job_hash, &qtr->trid, sizeof(qtr->trid), qtr);
+	int rc = cf_rchash_put_unique(g_query_job_hash, &qtr->trid, sizeof(qtr->trid), qtr);
 	if (rc) {
 		cf_warning(AS_SINDEX, "QTR Put in hash failed with error %d", rc);
 	}
@@ -1082,9 +1088,9 @@ hash_put_qtr(as_query_transaction * qtr)
 static int
 hash_get_qtr(uint64_t trid, as_query_transaction ** qtr)
 {
-	int rv = rchash_get(g_query_job_hash, &trid, sizeof(trid), (void **) qtr);
-	if (RCHASH_OK != rv) {
-		cf_info(AS_SCAN, "Query job with transaction id [%"PRIu64"] does not exist", trid );
+	int rv = cf_rchash_get(g_query_job_hash, &trid, sizeof(trid), (void **) qtr);
+	if (CF_RCHASH_OK != rv) {
+		cf_info(AS_SINDEX, "Query job with transaction id [%"PRIu64"] does not exist", trid );
 	}
 	return rv;
 }
@@ -1097,8 +1103,8 @@ hash_delete_qtr(as_query_transaction *qtr)
 		return AS_QUERY_CONTINUE;
 	}
 
-	int rv = rchash_delete(g_query_job_hash, &qtr->trid, sizeof(qtr->trid));
-	if (RCHASH_OK != rv) {
+	int rv = cf_rchash_delete(g_query_job_hash, &qtr->trid, sizeof(qtr->trid));
+	if (CF_RCHASH_OK != rv) {
 		cf_warning(AS_SINDEX, "Failed to delete qtr from query hash.");
 	}
 	return rv;
@@ -1236,9 +1242,7 @@ query_send_bg_udf_response(as_transaction *tr)
 {
 	cf_detail(AS_QUERY, "Send Fin for Background UDF");
 	bool force_close = as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) != 0;
-	// Note: should be inside release file handle ?
-	tr->from.proto_fd_h->last_used = cf_getms();
-	as_end_of_transaction(tr->from.proto_fd_h, force_close);
+	query_release_fd(tr->from.proto_fd_h, force_close);
 	tr->from.proto_fd_h = NULL;
 }
 
@@ -1573,7 +1577,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	// Attempt the query reservation here as well. If this partition is not
 	// query-able anymore then no need to return anything
 	// Since we are reserving all the partitions upfront, this is a defensive check
-	uint32_t pid = as_partition_getid(*dig);
+	uint32_t pid = as_partition_getid(dig);
 	rsv = query_reserve_partition(ns, qtr, pid, rsv);
 	if (!rsv) {
 		return AS_QUERY_OK;
@@ -1587,8 +1591,17 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 	if (rec_rv == 0) {
 		as_index *r = r_ref.r;
-		// check to see this isn't an expired record waiting to die
-		if (as_record_is_expired(r)) {
+
+		predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
+
+		if (qtr->predexp_eval &&
+			! predexp_matches_metadata(qtr->predexp_eval, &predargs)) {
+			as_record_done(&r_ref, ns);
+			goto CLEANUP;
+		}
+
+		// check to see this isn't a record waiting to die
+		if (as_record_is_doomed(r, ns)) {
 			as_record_done(&r_ref, ns);
 			cf_debug(AS_QUERY,
 					"build_response: record expired. treat as not found");
@@ -1596,9 +1609,10 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 			// that server will never send a error result code to the query client.
 			goto CLEANUP;
 		}
+
 		// make sure it's brought in from storage if necessary
 		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, &r->key);
+		as_storage_record_open(ns, r, &rd);
 		qtr->n_read_success += 1;
 		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
@@ -1611,6 +1625,17 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		// Figure out which bins you want - for now, all
 		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 		rd.n_bins = as_bin_inuse_count(&rd);
+
+		// Now we have a record.
+		predargs.rd = &rd;
+
+		if (qtr->predexp_eval &&
+			 ! predexp_matches_record(qtr->predexp_eval, &predargs)) {
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+			goto CLEANUP;
+		}
+
 		// Call Back
 		if (!query_record_matches(qtr, &rd, skey)) {
 			as_storage_record_close(&rd);
@@ -1826,6 +1851,38 @@ query_udf_bg_tr_complete(void *udata, int retcode)
 int
 query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
+	if (qtr->origin.predexp) {
+		as_partition_reservation rsv_stack;
+		as_partition_reservation *rsv = &rsv_stack;
+		uint32_t pid = as_partition_getid(keyd);
+
+		if (! (rsv = query_reserve_partition(qtr->ns, qtr, pid, rsv))) {
+			return AS_QUERY_OK;
+		}
+
+		as_index_ref r_ref;
+		r_ref.skip_lock = false;
+
+		if (as_record_get_live(rsv->tree, keyd, &r_ref, qtr->ns) != 0) {
+			query_release_partition(qtr, rsv);
+			return AS_QUERY_OK;
+		}
+
+		predexp_args_t predargs = {
+				.ns = qtr->ns, .md = r_ref.r, .vl = NULL, .rd = NULL
+		};
+
+		if (qtr->origin.predexp &&
+				! predexp_matches_metadata(qtr->origin.predexp, &predargs)) {
+			as_record_done(&r_ref, qtr->ns);
+			query_release_partition(qtr, rsv);
+			return AS_QUERY_OK;
+		}
+
+		as_record_done(&r_ref, qtr->ns);
+		query_release_partition(qtr, rsv);
+	}
+
 	as_transaction tr;
 
 	if (as_transaction_init_iudf(&tr, qtr->ns, keyd, &qtr->origin, qtr->is_durable_delete)) {
@@ -2686,8 +2743,8 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 {
 
 #if defined(USE_SYSTEMTAP)
-    uint64_t nodeid = g_config.self_node;
-    uint64_t trid = tr? tr->trid : 0;
+	uint64_t nodeid = g_config.self_node;
+	uint64_t trid = tr ? as_transaction_trid(tr) : 0;
 #endif
 
 	int rv = AS_QUERY_ERR;
@@ -2699,6 +2756,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	as_sindex *si           = NULL;
 	cf_vector *binlist      = 0;
 	as_sindex_range *srange = 0;
+	predexp_eval_t *predexp_eval = NULL;
 	char *setname           = NULL;
 	as_query_transaction *qtr = NULL;
 
@@ -2743,11 +2801,10 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	}
 
 	if (si) {
-		// Validate index and range specified
-		ret = as_sindex_assert_query(si, srange);
-		if (AS_QUERY_OK != ret) {
-			cf_warning(AS_QUERY, "Query Parameter Mismatch %d", ret);
-			tr->result_code = as_sindex_err_to_clienterr(ret, __FILE__, __LINE__);
+
+		if (! as_sindex_can_query(si)) {
+			tr->result_code = as_sindex_err_to_clienterr(
+					AS_SINDEX_ERR_NOT_READABLE, __FILE__, __LINE__);
 			goto Cleanup;
 		}
 	} else {
@@ -2756,6 +2813,17 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		si = as_sindex_from_range(ns, setname, srange);
 	}
 
+	if (as_transaction_has_predexp(tr)) {
+		as_msg_field * pfp =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
+		predexp_eval = predexp_build(pfp);
+		if (! predexp_eval) {
+			cf_warning(AS_QUERY, "Failed to build predicate expression");
+			tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
+			goto Cleanup;
+		}
+	}
+	
 	int numbins = 0;
 	// Populate binlist to be Projected by the Query
 	binlist = as_sindex_binlist_from_msg(ns, &tr->msgp->msg, &numbins);
@@ -2788,6 +2856,13 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		goto Cleanup;
 	}
 
+	if (qtype == QUERY_TYPE_AGGR && as_transaction_has_predexp(tr)) {
+		cf_warning(AS_QUERY, "aggregation queries do not support predexp filters");
+		tr->result_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+		rv              = AS_QUERY_ERR;
+		goto Cleanup;
+	}
+
 	ASD_QUERY_QTRSETUP_STARTING(nodeid, trid);
 	qtr = qtr_alloc();
 	if (!qtr) {
@@ -2812,7 +2887,11 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	query_setup_fd(qtr, tr);
 
-	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+	if (qtr->job_type == QUERY_TYPE_LOOKUP) {
+		qtr->predexp_eval = predexp_eval;
+	}
+	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+		qtr->origin.predexp = predexp_eval;
 		qtr->origin.cb     = query_udf_bg_tr_complete;
 		qtr->origin.udata  = (void *)qtr;
 		qtr->is_durable_delete = as_transaction_is_durable_delete(tr);
@@ -2842,6 +2921,7 @@ Cleanup:
 	// Pre Query Setup Failure
 	if (setname)     cf_free(setname);
 	if (si)          AS_SINDEX_RELEASE(si);
+	if (predexp_eval) predexp_destroy(predexp_eval);
 	if (srange)      as_sindex_range_free(&srange);
 	if (binlist)     cf_vector_destroy(binlist);
 	return rv;
@@ -2875,10 +2955,11 @@ as_query(as_transaction *tr, as_namespace *ns)
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.
 		bool force_close = as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) != 0;
-		as_end_of_transaction(tr->from.proto_fd_h, force_close);
+		query_release_fd(tr->from.proto_fd_h, force_close);
 		tr->from.proto_fd_h = NULL; // Paranoid
 		return AS_QUERY_OK;
 	} else if (rv == AS_QUERY_ERR) {
+		// tsvc takes care of managing fd
 		return AS_QUERY_ERR;
 	}
 
@@ -2923,7 +3004,7 @@ as_query_kill(uint64_t trid)
 	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
-		cf_warning(AS_QUERY, "Cannot kill query with trid [ %"PRIu64" ]",  trid);
+		cf_warning(AS_QUERY, "Cannot kill query with trid [%"PRIu64"]",  trid);
 	} else {
 		qtr_set_abort(qtr, AS_PROTO_RESULT_FAIL_QUERY_USERABORT, __FILE__, __LINE__);
 		rv = AS_QUERY_OK;
@@ -2941,7 +3022,7 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
-		cf_warning(AS_QUERY, "Cannot set priority for query with trid [ %"PRIu64" ]",  trid);
+		cf_warning(AS_QUERY, "Cannot set priority for query with trid [%"PRIu64"]",  trid);
 	} else {
 		uint32_t old_priority = qtr->priority;
 		qtr->priority = priority;
@@ -2953,7 +3034,7 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 }
 
 int
-as_query_list_job_reduce_fn (void *key, uint32_t keylen, void *object, void *udata)
+as_query_list_job_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 	as_query_transaction * qtr = (as_query_transaction*)object;
 	cf_dyn_buf * db = (cf_dyn_buf*) udata;
@@ -2980,14 +3061,14 @@ as_query_list_job_reduce_fn (void *key, uint32_t keylen, void *object, void *uda
 int
 as_query_list(char *name, cf_dyn_buf *db)
 {
-	uint32_t size = rchash_get_size(g_query_job_hash);
+	uint32_t size = cf_rchash_get_size(g_query_job_hash);
 	// No elements in the query job hash, return failure
 	if (!size) {
 		cf_dyn_buf_append_string(db, "No running queries");
 	}
 	// Else go through all the jobs in the hash and list their statistics
 	else {
-		rchash_reduce(g_query_job_hash, as_query_list_job_reduce_fn, db);
+		cf_rchash_reduce(g_query_job_hash, as_query_list_job_reduce_fn, db);
 		cf_dyn_buf_chomp(db);
 	}
 	return AS_QUERY_OK;
@@ -3040,7 +3121,7 @@ as_query_get_jobstat(uint64_t trid)
 	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
-		cf_warning(AS_MON, "No query was found with trid [ %"PRIu64" ]", trid);
+		cf_warning(AS_MON, "No query was found with trid [%"PRIu64"]", trid);
 		stat = NULL;
 	}
 	else {
@@ -3057,7 +3138,7 @@ as_query_get_jobstat(uint64_t trid)
 
 
 int
-as_mon_query_jobstat_reduce_fn (void *key, uint32_t keylen, void *object, void *udata)
+as_mon_query_jobstat_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 	as_query_transaction * qtr = (as_query_transaction*)object;
 	query_jobstat *job_pool = (query_jobstat*) udata;
@@ -3073,7 +3154,7 @@ as_mon_query_jobstat_reduce_fn (void *key, uint32_t keylen, void *object, void *
 as_mon_jobstat *
 as_query_get_jobstat_all(int * size)
 {
-	*size = rchash_get_size(g_query_job_hash);
+	*size = cf_rchash_get_size(g_query_job_hash);
 	if(*size == 0) return AS_QUERY_OK;
 
 	as_mon_jobstat     * job_stats;
@@ -3086,7 +3167,7 @@ as_query_get_jobstat_all(int * size)
 	job_pool.jobstat  = &job_stats;
 	job_pool.index    = 0;
 	job_pool.max_size = *size;
-	rchash_reduce(g_query_job_hash, as_mon_query_jobstat_reduce_fn, &job_pool);
+	cf_rchash_reduce(g_query_job_hash, as_mon_query_jobstat_reduce_fn, &job_pool);
 	*size              = job_pool.index;
 	return job_stats;
 }
@@ -3150,12 +3231,6 @@ as_query_gconfig_default(as_config *c)
 	c->partitions_pre_reserved       = false;
 }
 
-uint32_t
-query_job_trid_hash(void *value, uint32_t keylen)
-{
-	return( *(uint32_t *)value);
-}
-
 
 void
 as_query_init()
@@ -3164,7 +3239,7 @@ as_query_init()
 	cf_detail(AS_QUERY, "Initialize %d Query Worker threads.", g_config.query_threads);
 
 	// global job hash to keep track of the query job
-	int rc = rchash_create(&g_query_job_hash, query_job_trid_hash, NULL, sizeof(uint64_t), 64, RCHASH_CR_MT_MANYLOCK);
+	int rc = cf_rchash_create(&g_query_job_hash, cf_rchash_fn_u32, NULL, sizeof(uint64_t), 64, CF_RCHASH_CR_MT_MANYLOCK);
 	if (rc) {
 		cf_crash(AS_QUERY, "Failed to create query job hash");
 	}

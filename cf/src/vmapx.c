@@ -34,8 +34,7 @@
 #include <string.h>
 
 #include "citrusleaf/alloc.h"
-
-#include "util.h"
+#include "citrusleaf/cf_hash_math.h"
 
 
 //==========================================================
@@ -121,9 +120,14 @@ cf_vmapx_count(const cf_vmapx* this)
 cf_vmapx_err
 cf_vmapx_get_by_index(const cf_vmapx* this, uint32_t index, void** pp_value)
 {
-	if (index >= this->count) {
-		return CF_VMAPX_ERR_BAD_PARAM;
-	}
+	// This check is commented out for now to avoid the volatile access.
+	// TODO - ultimately, caller code can be simplified. (Especially if this
+	// just returned the value pointer.) And if necessary, we could make a
+	// "safe" version of this that does the check.
+
+//	if (index >= this->count) {
+//		return CF_VMAPX_ERR_BAD_PARAM;
+//	}
 
 	*pp_value = cf_vmapx_value_ptr(this, index);
 
@@ -177,6 +181,10 @@ cf_vmapx_err
 cf_vmapx_get_index_w_len(const cf_vmapx* this, const char* name,
 		size_t name_len, uint32_t* p_index)
 {
+	if (name_len >= this->key_size) {
+		return CF_VMAPX_ERR_NAME_NOT_FOUND;
+	}
+
 	return vhash_get(this->p_hash, name, name_len, p_index) ?
 			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
 }
@@ -188,24 +196,24 @@ cf_vmapx_get_index_w_len(const cf_vmapx* this, const char* name,
 // enable us to rebuild the hash map on warm
 // restart.)
 //
-// If name is not found, add new value and return
-// newly assigned index (and CF_VMAPX_OK). If name
-// is found, return index for existing name (with
-// CF_VMAPX_ERR_NAME_EXISTS) but ignore new value.
-// May pass null p_index.
+// If name is not found, add new name, clear rest
+// of value in vector, and return newly assigned
+// index (and CF_VMAPX_OK). If name is found,
+// return index for existing value (with
+// CF_VMAPX_ERR_NAME_EXISTS). May pass null
+// p_index.
 //
 cf_vmapx_err
-cf_vmapx_put_unique(cf_vmapx* this, const void* p_value, uint32_t* p_index)
+cf_vmapx_put_unique(cf_vmapx* this, const char* name, uint32_t* p_index)
 {
-	return cf_vmapx_put_unique_w_len(this, p_value,
-			strlen((const char*)p_value), p_index);
+	return cf_vmapx_put_unique_w_len(this, name, strlen(name), p_index);
 }
 
 //------------------------------------------------
 // Same as above, but with known name length.
 //
 cf_vmapx_err
-cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
+cf_vmapx_put_unique_w_len(cf_vmapx* this, const char* name, size_t name_len,
 		uint32_t* p_index)
 {
 	// Make sure name fits in key's allocated size.
@@ -216,9 +224,17 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 	pthread_mutex_lock(&this->write_lock);
 
 	// If name is found, return existing name's index, ignore p_value.
-	if (vhash_get(this->p_hash, (const char*)p_value, name_len, p_index)) {
+	if (vhash_get(this->p_hash, name, name_len, p_index)) {
 		pthread_mutex_unlock(&this->write_lock);
 		return CF_VMAPX_ERR_NAME_EXISTS;
+	}
+
+	// Make sure name has no illegal premature null-terminator.
+	for (uint32_t i = 0; i < name_len; i++) {
+		if (name[i] == 0) {
+			pthread_mutex_unlock(&this->write_lock);
+			return CF_VMAPX_ERR_BAD_PARAM;
+		}
 	}
 
 	uint32_t count = this->count;
@@ -229,13 +245,11 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 		return CF_VMAPX_ERR_FULL;
 	}
 
-	// Add to vector.
+	// Add name to vector (and clear rest of value).
 	char* value_ptr = (char*)cf_vmapx_value_ptr(this, count);
 
-	memcpy((void*)value_ptr, p_value, this->value_size);
-
-	// In case it wasn't already, null-terminate name within stored value.
-	value_ptr[name_len] = 0;
+	memset((void*)value_ptr, 0, this->value_size);
+	memcpy((void*)value_ptr, name, name_len);
 
 	// Increment count here so indexes returned by other public API calls (just
 	// after adding to hash below) are guaranteed to be valid.
@@ -298,6 +312,17 @@ typedef struct vhash_ele_s {
 
 #define VHASH_ELE_KEY_PTR(_e)		((char*)_e->data)
 #define VHASH_ELE_VALUE_PTR(_h, _e)	((uint32_t*)(_e->data + _h->key_size))
+
+// Copy null-terminated key into hash, then pad with non-null characters.
+// Padding ensures quicker compare in vhash_get() when key in hash is shorter,
+// and prevents accidental match if key param has illegal null character(s).
+static inline void
+vhash_set_ele_key(char* ele_key, size_t key_size, const char* zkey,
+		size_t zkey_size)
+{
+	memcpy((void*)ele_key, (const void*)zkey, zkey_size);
+	memset((void*)(ele_key + zkey_size), 'x', key_size - zkey_size);
+}
 
 //------------------------------------------------
 // Create vhash with specified key size (max) and
@@ -364,13 +389,13 @@ vhash_destroy(vhash* h)
 bool
 vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 {
-	uint64_t hashed_key = cf_hash_fnv((void*)zkey, key_len);
+	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)zkey, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 
 	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
 
 	if (h->row_counts[row_i] == 0) {
-		strcpy(VHASH_ELE_KEY_PTR(e), zkey);
+		vhash_set_ele_key(VHASH_ELE_KEY_PTR(e), h->key_size, zkey, key_len + 1);
 		*VHASH_ELE_VALUE_PTR(h, e) = value;
 		h->row_counts[row_i]++;
 
@@ -394,7 +419,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	e->next = e_head->next;
 	e_head->next = e;
 
-	strcpy(VHASH_ELE_KEY_PTR(e), zkey);
+	vhash_set_ele_key(VHASH_ELE_KEY_PTR(e), h->key_size, zkey, key_len + 1);
 	*VHASH_ELE_VALUE_PTR(h, e) = value;
 	h->row_counts[row_i]++;
 
@@ -408,7 +433,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 bool
 vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value)
 {
-	uint64_t hashed_key = cf_hash_fnv((void*)key, key_len);
+	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)key, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 	uint32_t row_count = h->row_counts[row_i];
 

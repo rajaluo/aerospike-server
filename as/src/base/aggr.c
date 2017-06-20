@@ -109,14 +109,14 @@ pre_check(aggr_state *astate, void *skey)
 }
 
 static int
-aopen(aggr_state *astate, cf_digest digest)
+aopen(aggr_state *astate, const cf_digest *digest)
 {
 	udf_record   * urecord  = as_rec_source(astate->urec);
 	as_index_ref   * r_ref  = urecord->r_ref;
 	as_transaction * tr     = urecord->tr;
 
 	int pid                = as_partition_getid(digest);
-	urecord->keyd = digest;
+	urecord->keyd = *digest;
 
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 	astate->rsv        = ptn_reserve(astate, pid, &tr->rsv);
@@ -128,7 +128,7 @@ aopen(aggr_state *astate, cf_digest digest)
 	// NB: Partial Initialization due to heaviness. Not everything needed
 	// TODO: Make such initialization Commodity
 	tr->rsv.ns          = astate->rsv->ns;
-	tr->rsv.state       = astate->rsv->state;
+	tr->rsv.reject_repl_write = astate->rsv->reject_repl_write;
 	tr->rsv.p           = astate->rsv->p;
 	tr->rsv.tree        = astate->rsv->tree;
 	tr->rsv.cluster_key = astate->rsv->cluster_key;
@@ -223,7 +223,7 @@ istream_read(const as_stream *s)
 			return NULL;
 		}
 
-		if (!aopen(astate, astate->keys_arr->pindex_digs[astate->keys_arr_offset])) {
+		if (!aopen(astate, &astate->keys_arr->pindex_digs[astate->keys_arr_offset])) {
 			if (!pre_check(astate, &astate->keys_arr->sindex_keys[astate->keys_arr_offset])) {
 				aclose(astate);
 			}

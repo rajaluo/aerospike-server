@@ -32,8 +32,8 @@ typedef struct linear_hist_threshold_s {
 	uint32_t value;
 	uint32_t bucket_index;
 	uint32_t bucket_width;
-	uint32_t bucket_count;
-	uint32_t target_count;
+	uint64_t bucket_count;
+	uint64_t target_count;
 } linear_hist_threshold;
 
 //------------------------------------------------
@@ -45,11 +45,11 @@ void linear_hist_destroy(linear_hist *h);
 void linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset, uint32_t num_buckets);
 void linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset);
 
-uint32_t linear_hist_get_total(linear_hist *h);
+uint64_t linear_hist_get_total(linear_hist *h);
 void linear_hist_merge(linear_hist *h1, linear_hist *h2);
 void linear_hist_insert_data_point(linear_hist *h, uint32_t point);
-uint32_t linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct, linear_hist_threshold *p_threshold);
-uint32_t linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal, linear_hist_threshold *p_threshold);
+uint64_t linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct, linear_hist_threshold *p_threshold);
+uint64_t linear_hist_get_threshold_for_subtotal(linear_hist *h, uint64_t subtotal, linear_hist_threshold *p_threshold);
 
 void linear_hist_dump(linear_hist *h);
 void linear_hist_save_info(linear_hist *h);

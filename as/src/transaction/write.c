@@ -46,6 +46,7 @@
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "base/truncate.h"
 #include "base/xdr_serverside.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
@@ -537,7 +538,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		r = r_ref.r;
 
-		if (as_record_is_expired(r)) {
+		if (as_record_is_doomed(r, ns)) {
 			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_NOTFOUND);
 			return TRANS_DONE_ERROR;
 		}
@@ -554,11 +555,9 @@ write_master(rw_request* rw, as_transaction* tr)
 		r = r_ref.r;
 		record_created = rv == 1;
 
-		// If it's an expired record, pretend it's a fresh create.
-		if (! record_created && as_record_is_expired(r)) {
-			as_record_destroy(r, ns);
-			as_record_reinitialize(&r_ref, ns);
-			cf_atomic64_incr(&ns->n_objects);
+		// If it's an expired or truncated record, pretend it's a fresh create.
+		if (! record_created && as_record_is_doomed(r, ns)) {
+			as_record_rescue(&r_ref, ns);
 			record_created = true;
 		}
 	}
@@ -589,6 +588,12 @@ write_master(rw_request* rw, as_transaction* tr)
 			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_FORBIDDEN);
 			return TRANS_DONE_ERROR;
 		}
+
+		// Don't write record if it would be truncated.
+		if (as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
+			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_FORBIDDEN);
+			return TRANS_DONE_ERROR;
+		}
 	}
 
 	// Shortcut set name.
@@ -608,10 +613,10 @@ write_master(rw_request* rw, as_transaction* tr)
 	as_storage_rd rd;
 
 	if (record_created) {
-		as_storage_record_create(ns, r, &rd, &tr->keyd);
+		as_storage_record_create(ns, r, &rd);
 	}
 	else {
-		as_storage_record_open(ns, r, &rd, &tr->keyd);
+		as_storage_record_open(ns, r, &rd);
 	}
 
 	// Deal with delete durability (enterprise only).
@@ -781,13 +786,13 @@ write_master_preprocessing(as_transaction* tr)
 
 	// ns->stop_writes is set by thr_nsup if configured threshold is breached.
 	if (cf_atomic32_get(ns->stop_writes) == 1) {
-		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE);
+		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_OUT_OF_SPACE);
 		return false;
 	}
 
 	if (! as_storage_has_space(ns)) {
 		cf_warning(AS_RW, "{%s}: write_master: drives full", ns->name);
-		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE);
+		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_OUT_OF_SPACE);
 		return false;
 	}
 
@@ -831,13 +836,12 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 
 	bool must_not_create =
-			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) ||
-			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) ||
-			(m->info3 & AS_MSG_INFO3_BIN_REPLACE_ONLY);
+			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) != 0 ||
+			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
 	bool record_level_replace =
-			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) ||
-			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY);
+			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) != 0 ||
+			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
 	bool must_fetch_data = false;
 
@@ -871,7 +875,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				// Allow AS_PARTICLE_TYPE_NULL, although bin-delete operations
 				// are not likely in single-bin configuration.
 				op->particle_type != AS_PARTICLE_TYPE_NULL) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't write non-integer in data-in-index configuration ", ns->name);
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't write data type %u in data-in-index configuration ", ns->name, op->particle_type);
 			return AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
 		}
 
@@ -955,7 +959,7 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		if (set_name) {
-			cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has no set name ",
+			cf_warning_digest(AS_RW, &tr->keyd, "overwriting record in set '%s' but msg has no set name ",
 					set_name);
 		}
 
@@ -967,12 +971,10 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 	if (! set_name ||
 			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
 			set_name[msg_set_name_len] != 0) {
-		char msg_set_name[msg_set_name_len + 1];
+		CF_ZSTR_DEFINE(msg_set_name, AS_SET_NAME_MAX_SIZE + 4, f->data,
+				msg_set_name_len);
 
-		memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
-		msg_set_name[msg_set_name_len] = 0;
-
-		cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has different set name '%s' ",
+		cf_warning_digest(AS_RW, &tr->keyd, "overwriting record in set '%s' but msg has different set name '%s' ",
 				set_name ? set_name : "(null)", msg_set_name);
 		return false;
 	}
@@ -1233,7 +1235,7 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// Success - adjust sindex, looking at old and new bins.
 	//
 
-	if (as_sindex_ns_has_sindex(ns) &&
+	if (record_has_sindex(r, ns) &&
 			write_master_sindex_update(ns, set_name, &tr->keyd, old_bins,
 					n_old_bins, new_bins, n_new_bins)) {
 		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
@@ -1325,7 +1327,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	// the new record bin to write.
 	//
 
-	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
+	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
 	uint32_t n_new_bins = 0;
 
@@ -1393,7 +1395,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = rd->r;
-	bool has_sindex = as_sindex_ns_has_sindex(ns);
+	bool has_sindex = record_has_sindex(r, ns);
 
 	// If it's not touch or modify, determine if we must read existing record.
 	if (! must_fetch_data) {
@@ -1462,7 +1464,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// the new record bins to write.
 	//
 
-	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
+	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
 			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
@@ -1634,8 +1636,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
-	bool create_only = (m->info2 & AS_MSG_INFO2_BIN_CREATE_ONLY) != 0;
-	bool replace_only = (m->info3 & AS_MSG_INFO3_BIN_REPLACE_ONLY) != 0;
 
 	int result;
 
@@ -1669,7 +1669,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			// It's a regular bin write.
 			else {
-				as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, create_only, replace_only, &result);
+				as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
 
 				if (! b) {
 					return result;
@@ -1703,7 +1703,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		}
 		// Modify an existing bin value.
 		else if (OP_IS_MODIFY(op->op)) {
-			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, create_only, replace_only, &result);
+			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
 
 			if (! b) {
 				return result;
@@ -1763,7 +1763,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
-			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, create_only, replace_only, &result);
+			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
 
 			if (! b) {
 				return result;
@@ -1952,7 +1952,7 @@ write_master_sindex_update(as_namespace* ns, const char* set_name,
 				&new_bins[i_new], &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 	}
 
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 
 	if (sbins_populated != 0) {
 		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, keyd);
@@ -2018,8 +2018,9 @@ write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 		}
 
 		as_particle* p_new = b_new->particle;
+		uint32_t i_old;
 
-		for (uint32_t i_old = 0; i_old < n_old_bins; i_old++) {
+		for (i_old = 0; i_old < n_old_bins; i_old++) {
 			as_bin* b_old = &old_bins[i_old];
 
 			if (b_new->id == b_old->id) {
@@ -2030,13 +2031,18 @@ write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 				break;
 			}
 		}
+
+		if (i_old == n_old_bins) {
+			as_bin_particle_destroy(b_new, true);
+		}
 	}
 
 	for (uint32_t i_cleanup = 0; i_cleanup < n_cleanup_bins; i_cleanup++) {
 		as_bin* b_cleanup = &cleanup_bins[i_cleanup];
 		as_particle* p_cleanup = b_cleanup->particle;
+		uint32_t i_old;
 
-		for (uint32_t i_old = 0; i_old < n_old_bins; i_old++) {
+		for (i_old = 0; i_old < n_old_bins; i_old++) {
 			as_bin* b_old = &old_bins[i_old];
 
 			if (b_cleanup->id == b_old->id) {
@@ -2046,6 +2052,10 @@ write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 
 				break;
 			}
+		}
+
+		if (i_old == n_old_bins) {
+			as_bin_particle_destroy(b_cleanup, true);
 		}
 	}
 

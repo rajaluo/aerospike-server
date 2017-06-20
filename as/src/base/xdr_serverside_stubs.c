@@ -22,14 +22,12 @@
 
 #include "base/xdr_serverside.h"
 
-xdr_state g_xdr_state = XDR_DOWN;
-
 int as_xdr_init()
 {
 	return -1;
 }
 
-void xdr_conf_init(const char *config_file)
+void xdr_config_post_process()
 {
 }
 
@@ -70,7 +68,7 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 {
 }
 
-void as_xdr_handle_txn(as_transaction *txn)
+void as_xdr_read_txn(as_transaction *txn)
 {
 }
 
@@ -88,11 +86,7 @@ int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)
 	return -1;
 }
 
-void xdr_handle_failednodeprocessingdone(cf_node nodeid)
-{
-}
-
-void as_xdr_get_stats(char *name, cf_dyn_buf *db)
+void as_xdr_get_stats(cf_dyn_buf *db)
 {
 }
 
@@ -100,14 +94,14 @@ void as_xdr_get_config(cf_dyn_buf *db)
 {
 }
 
-void as_xdr_set_config(char *params, cf_dyn_buf *db)
+bool as_xdr_set_config(char *params)
 {
-	cf_dyn_buf_append_string(db, "error");
+	return false;
 }
 
-int32_t as_xdr_set_config_ns(char *ns_name, char *params)
+bool as_xdr_set_config_ns(char *ns_name, char *params)
 {
-	return -1;
+	return false;
 }
 
 bool is_xdr_delete_shipping_enabled()
@@ -124,3 +118,8 @@ bool is_xdr_forwarding_enabled()
 {
 	return false;
 }
+
+void xdr_cfg_add_int_ext_mapping(dc_config_opt *dc_cfg, char* orig, char* alt)
+{
+}
+

@@ -27,12 +27,10 @@
 #include <stdint.h>
 
 #include "dynbuf.h"
-#include "util.h"
 
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/transaction.h"
-#include "fabric/paxos.h"
 
 typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
 typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
@@ -57,9 +55,6 @@ extern int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
 extern int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
-
-extern void as_info_paxos_event(as_paxos_generation gen,
-		as_paxos_change *change, cf_node succession[], void *udata);
 
 typedef struct as_info_transaction_s {
 	as_file_handle *fd_h;

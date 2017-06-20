@@ -45,6 +45,88 @@
 #define CVERIFY(expr, line) typedef char CGLUE(compiler_assert_failed_on_line_, line)[(expr) ? 1 : -1]
 #define COMPILER_ASSERT(expr) CVERIFY(expr, __LINE__)
 
+// Use CF_MUST_CHECK with declarations to force caller to handle return value.
+//
+// e.g.
+// CF_MUST_CHECK int my_function();
+//
+#define CF_MUST_CHECK __attribute__((warn_unused_result))
+
+// Use CF_IGNORE_ERROR() as caller to override CF_MUST_CHECK in declaration.
+//
+// e.g.
+// CF_IGNORE_ERROR(my_function());
+//
+#define CF_IGNORE_ERROR(x) ((void)((x) == 12345))
+
+// Use CF_NEVER_FAILS() as caller to assert that returned value is not negative.
+//
+// e.g.
+// CF_NEVER_FAILS(my_function());
+//
+#define CF_NEVER_FAILS(x) \
+do { \
+	if ((x) < 0) { \
+		cf_crash(CF_MISC, "this cannot happen..."); \
+	} \
+} while (false);
+
+// Use CF_ZSTR_DEFINE() to null-terminate strings conveniently.
+//
+// e.g.
+// CF_ZSTR_DEFINE(zstr, 40, ns_name, name_sz);
+// cf_warning(AS_NAMESPACE, "got namespace %s", zstr);
+//
+#define CF_ZSTR_DEFINE(zstr, max_sz, str, sz) \
+		char zstr[max_sz]; \
+		size_t zstr##len = sz < max_sz ? sz : max_sz - 1; \
+		memcpy(zstr, str, zstr##len); \
+		zstr[zstr##len] = 0;
+
+// Use CF_ZSTRxx() to null-terminate strings conveniently. Useful especially as
+// cf_detail & cf_debug parameters where there's no cost unless the log level
+// is enabled. (Cost may be more than CF_ZSTR_DEFINE() due to copying struct on
+// function return.)
+//
+// e.g.
+// cf_debug(AS_NAMESPACE, "got namespace %s", CF_ZSTR64(ns_name, name_sz));
+//
+
+typedef struct cf_zstr64_s {
+	char s[64];
+} cf_zstr64;
+
+typedef struct cf_zstr1k_s {
+	char s[1024];
+} cf_zstr1k;
+
+static inline cf_zstr64
+cf_null_terminate_64(const char *str, size_t sz)
+{
+	cf_zstr64 zstr;
+	size_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
+
+	memcpy(zstr.s, str, len);
+	zstr.s[len] = 0;
+
+	return zstr;
+}
+
+static inline cf_zstr1k
+cf_null_terminate_1k(const char *str, size_t sz)
+{
+	cf_zstr1k zstr;
+	size_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
+
+	memcpy(zstr.s, str, len);
+	zstr.s[len] = 0;
+
+	return zstr;
+}
+
+#define CF_ZSTR64(str, sz) (cf_null_terminate_64((const char *)str, sz).s)
+#define CF_ZSTR1K(str, sz) (cf_null_terminate_1k((const char *)str, sz).s)
+
 
 /* SYNOPSIS
  * Fault scoping
@@ -66,7 +148,7 @@ typedef enum {
 
 	CF_ALLOC,
 	CF_ARENAX,
-	CF_JEM,
+	CF_HARDWARE,
 	CF_MSG,
 	CF_RBUFFER,
 	CF_SOCKET,
@@ -77,10 +159,11 @@ typedef enum {
 	AS_BATCH,
 	AS_BIN,
 	AS_CFG,
+	AS_CLUSTERING,
 	AS_COMPRESSION,
 	AS_DEMARSHAL,
-	AS_DRV_KV,
 	AS_DRV_SSD,
+	AS_EXCHANGE,
 	AS_FABRIC,
 	AS_GEO,
 	AS_HB,
@@ -97,6 +180,7 @@ typedef enum {
 	AS_PARTICLE,
 	AS_PARTITION,
 	AS_PAXOS,
+	AS_PREDEXP,
 	AS_PROTO,
 	AS_PROXY,
 	AS_QUERY,
@@ -107,10 +191,10 @@ typedef enum {
 	AS_SINDEX,
 	AS_SMD,
 	AS_STORAGE,
+	AS_TRUNCATE,
 	AS_TSVC,
 	AS_UDF,
 	AS_XDR,
-
 	CF_FAULT_CONTEXT_UNDEF
 } cf_fault_context;
 
@@ -181,24 +265,33 @@ extern void cf_fault_sink_logroll(void);
 extern void cf_fault_use_local_time(bool val);
 extern bool cf_fault_is_using_local_time();
 
+extern void cf_fault_log_millis(bool log_millis);
+extern bool cf_fault_is_logging_millis();
+
 extern cf_fault_severity cf_fault_filter[];
 
 // Define the mechanism that we'll use to write into the Server Log.
 // cf_fault_event() is "regular" logging
 extern void cf_fault_event(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name,
-		const int line, char *msg, ...)
+		const int line, const char *msg, ...)
 		__attribute__ ((format (printf, 5, 6)));
 
 // cf_fault_event2() is for advanced logging, where we want to print some
 // binary object (often a digest).
 extern void cf_fault_event2(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name, const int line,
-		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...)
+		void * mem_ptr, size_t len, cf_display_type dt, const char *msg, ...)
 		__attribute__ ((format (printf, 8, 9)));
 
 extern void cf_fault_event_nostack(const cf_fault_context,
 		const cf_fault_severity severity, const char *fn, const int line,
+		const char *msg, ...)
+		__attribute__ ((format (printf, 5, 6)));
+
+// For now there's only one cache, dumped by the ticker.
+extern void cf_fault_cache_event(cf_fault_context context,
+		cf_fault_severity severity, const char *file_name, int line,
 		char *msg, ...)
 		__attribute__ ((format (printf, 5, 6)));
 
@@ -306,7 +399,7 @@ do { \
 #define cf_detail_digest(...)  __DIGEST_SEVLOG(CF_DETAIL, ##__VA_ARGS__)
 
 // _GNU_SOURCE gives us a strerror_r() that returns (char *).
-#define cf_strerror(err) strerror_r(err, alloca(200), 200)
+#define cf_strerror(err) strerror_r(err, (char *)alloca(200), 200)
 
 /* cf_context_at_severity
  * Return whether the given context is set to this severity level or higher. */
@@ -314,4 +407,19 @@ extern bool cf_context_at_severity(const cf_fault_context context, const cf_faul
 
 extern void cf_fault_init();
 
-int generate_packed_hex_string(void *mem_ptr, uint len, char* output);
+int generate_packed_hex_string(void *mem_ptr, uint32_t len, char* output);
+
+// For now there's only one cache, dumped by the ticker.
+extern void cf_fault_dump_cache();
+
+#define cf_dump_ticker_cache() cf_fault_dump_cache()
+
+#define __CACHE_SEVLOG(severity, context, __msg, ...) \
+		(severity > cf_fault_filter[context] ? \
+				(void)0 : \
+				cf_fault_cache_event((context), severity, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
+
+#define cf_ticker_warning(...) __CACHE_SEVLOG(CF_WARNING, ##__VA_ARGS__)
+#define cf_ticker_info(...) __CACHE_SEVLOG(CF_INFO, ##__VA_ARGS__)
+#define cf_ticker_debug(...) __CACHE_SEVLOG(CF_DEBUG, ##__VA_ARGS__)
+#define cf_ticker_detail(...) __CACHE_SEVLOG(CF_DETAIL, ##__VA_ARGS__)

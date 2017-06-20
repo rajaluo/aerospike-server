@@ -30,11 +30,12 @@
 #include <stdint.h>
 
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/udf_record.h"
@@ -77,9 +78,24 @@ bool get_msg_key(as_transaction* tr, as_storage_rd* rd);
 int handle_msg_key(as_transaction* tr, as_storage_rd* rd);
 void update_metadata_in_index(as_transaction* tr, bool increment_generation, as_record* r);
 bool pickle_all(as_storage_rd* rd, rw_request* rw);
+void record_delete_adjust_sindex(as_record* r, as_namespace* ns);
 void delete_adjust_sindex(as_storage_rd* rd);
 void remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd, as_bin* bins, uint32_t n_bins);
 bool xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op);
+
+
+// TODO - rename as as_record_... and move to record.c?
+static inline bool
+record_has_sindex(const as_record* r, as_namespace* ns)
+{
+	if (! as_sindex_ns_has_sindex(ns)) {
+		return false;
+	}
+
+	as_set* set = as_namespace_get_record_set(ns, r);
+
+	return set ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
+}
 
 
 static inline bool
@@ -145,3 +161,4 @@ void dup_res_flag_pickle(const uint8_t* buf, uint32_t* info);
 bool dup_res_ignore_pickle(const uint8_t* buf, const msg* m);
 
 void repl_write_flag_pickle(const as_transaction* tr, const uint8_t* buf, uint32_t* info);
+bool repl_write_pickle_is_drop(const uint8_t* buf, uint32_t info);

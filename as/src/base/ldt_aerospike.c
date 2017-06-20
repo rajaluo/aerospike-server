@@ -44,7 +44,6 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
 
 #include "base/datamodel.h"
 #include "base/ldt.h"
@@ -204,7 +203,7 @@ slot_lookup_by_digest(ldt_record *lrecord, cf_digest *keyd)
 		ldt_slot_chunk *lchunk = &lrecord->chunk[i];
 		for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
 			if (lchunk->slots[j].inuse &&
-				(0 == cf_digest_compare(&lchunk->slots[j].rd.keyd, keyd))) {
+				(0 == cf_digest_compare(&lchunk->slots[j].rd.r->keyd, keyd))) {
 				return &lchunk->slots[j];
 			}
 		}
@@ -473,7 +472,7 @@ crec_create(ldt_record *lrecord)
 {
 	// Generate Key Digest
 	udf_record *h_urecord = (udf_record *) as_rec_source(lrecord->h_urec);
-	cf_digest keyd        = h_urecord->r_ref->r->key;
+	cf_digest keyd        = h_urecord->r_ref->r->keyd;
 	as_namespace *ns      = h_urecord->tr->rsv.ns;
 	int retry_cnt         = 0;
 	ldt_slot *lslotp      = slot_lookup_free(lrecord, "crec_create");

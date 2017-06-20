@@ -39,7 +39,7 @@
 
 #include "dynbuf.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/proto.h"
 #include "base/rec_props.h"

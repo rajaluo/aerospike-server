@@ -20,11 +20,11 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * runtime structures and definitions for serverside of XDR
- */
-
 #pragma once
+
+//==========================================================
+// Includes.
+//
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,12 +32,19 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
-#include "xdr_config.h"
 
 #include "base/datamodel.h"
 #include "base/transaction.h"
+
+//==========================================================
+// Forward declarations.
+//
+
+//==========================================================
+// Constants & typedefs.
+//
 
 typedef enum {
 	XDR_OP_TYPE_WRITE,
@@ -47,29 +54,33 @@ typedef enum {
 
 typedef uint64_t xdr_dirty_bins[2];
 
+//==========================================================
+// Public API.
+//
+
 int as_xdr_init();
-void xdr_conf_init(const char *config_file);
+void xdr_config_post_process();
 void as_xdr_start();
 int as_xdr_shutdown();
 void xdr_sig_handler(int signum);
 
-void xdr_broadcast_lastshipinfo(uint64_t val[]);
 void xdr_clear_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_fill_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_copy_dirty_bins(xdr_dirty_bins *from, xdr_dirty_bins *to);
 void xdr_add_dirty_bin(as_namespace *ns, xdr_dirty_bins *dirty, const char *name, size_t name_len);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, xdr_op_type op_type, uint16_t set_id, xdr_dirty_bins *dirty);
-void as_xdr_handle_txn(as_transaction *txn);
+void as_xdr_read_txn(as_transaction *txn);
 
 void as_xdr_info_init(void);
 void as_xdr_info_port(cf_serv_cfg *serv_cfg);
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
-void xdr_handle_failednodeprocessingdone(cf_node);
-void as_xdr_get_stats(char *name, cf_dyn_buf *db);
+void as_xdr_get_stats(cf_dyn_buf *db);
 void as_xdr_get_config(cf_dyn_buf *db);
-void as_xdr_set_config(char *params, cf_dyn_buf *db);
-int32_t as_xdr_set_config_ns(char *ns_name, char *params);
+bool as_xdr_set_config(char *params);
+bool as_xdr_set_config_ns(char *ns_name, char *params);
 
 bool is_xdr_delete_shipping_enabled();
 bool is_xdr_nsup_deletes_enabled();
 bool is_xdr_forwarding_enabled();
+
+void xdr_cfg_add_int_ext_mapping(dc_config_opt *dc_cfg, char* orig, char* alt);

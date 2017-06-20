@@ -1,7 +1,7 @@
 /*
  * security.h
  *
- * Copyright (C) 2014 Aerospike, Inc.
+ * Copyright (C) 2014-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -54,7 +54,8 @@ typedef enum {
 	PERM_SCAN_MANAGE	= 0x00040000,
 	PERM_QUERY_MANAGE	= 0x00080000,
 	PERM_JOB_MONITOR	= 0x00100000,
-	// ... 3 unused bits ...
+	PERM_TRUNCATE		= 0x00200000,
+	// ... 2 unused bits ...
 
 	// Deployment operations management.
 	PERM_SET_CONFIG		= 0x01000000,

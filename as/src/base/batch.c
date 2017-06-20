@@ -36,8 +36,10 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "hardware.h"
 #include "socket.h"
 #include <errno.h>
+#include <unistd.h>
 
 //---------------------------------------------------------
 // MACROS
@@ -84,6 +86,7 @@ struct as_batch_shared_s {
 	uint32_t tran_count;
 	uint32_t tran_max;
 	int result_code;
+	bool bad_response_fd;
 };
 
 typedef struct {
@@ -171,7 +174,7 @@ static void
 as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 {
 	// Don't send buffer if an error has already occurred.
-	if (! shared->fd_h || shared->result_code) {
+	if (shared->bad_response_fd || shared->result_code) {
 		return;
 	}
 
@@ -184,9 +187,9 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*)&buffer->proto, sizeof(as_proto) + buffer->size, MSG_NOSIGNAL | MSG_MORE);
 
 	if (status) {
-		// Socket error. Close socket.
-		as_end_of_transaction_force_close(shared->fd_h);
-		shared->fd_h = 0;
+		// Socket error. Release shared->fd_h after all sub-transactions are
+		// complete - shared->fd_h needed for security filter.
+		shared->bad_response_fd = true;
 		cf_atomic64_incr(&g_stats.batch_index_errors);
 	}
 }
@@ -195,7 +198,9 @@ static void
 as_batch_send_final(as_batch_shared* shared)
 {
 	// Send protocol trailer to client socket.
-	if (! shared->fd_h) {
+	if (shared->bad_response_fd) {
+		as_end_of_transaction_force_close(shared->fd_h);
+		shared->fd_h = NULL;
 		return;
 	}
 
@@ -220,7 +225,7 @@ as_batch_send_final(as_batch_shared* shared)
 	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
 
 	as_end_of_transaction(shared->fd_h, status != 0);
-	shared->fd_h = 0;
+	shared->fd_h = NULL;
 
 	// For now the model is timeouts don't appear in histograms.
 	if (shared->result_code != AS_PROTO_RESULT_FAIL_TIMEOUT) {
@@ -584,12 +589,18 @@ as_batch_init()
 		return -1;
 	}
 
-	uint32_t threads = g_config.n_batch_index_threads;
-	cf_info(AS_BATCH, "Initialize batch-index-threads to %u", threads);
-	int rc = as_thread_pool_init_fixed(&batch_thread_pool, threads, as_batch_worker, sizeof(as_batch_work), offsetof(as_batch_work,complete));
+	// Default 'batch-index-threads' can't be set before call to cf_topo_init().
+	if (g_config.n_batch_index_threads == 0) {
+		g_config.n_batch_index_threads = cf_topo_count_cpus();
+	}
+
+	cf_info(AS_BATCH, "starting %u batch-index-threads", g_config.n_batch_index_threads);
+
+	int rc = as_thread_pool_init_fixed(&batch_thread_pool, g_config.n_batch_index_threads, as_batch_worker,
+			sizeof(as_batch_work), offsetof(as_batch_work,complete));
 
 	if (rc) {
-		cf_warning(AS_BATCH, "Failed to initialize batch-index-threads to %u: %d", threads, rc);
+		cf_warning(AS_BATCH, "Failed to initialize batch-index-threads to %u: %d", g_config.n_batch_index_threads, rc);
 		return rc;
 	}
 
@@ -600,7 +611,7 @@ as_batch_init()
 		return rc;
 	}
 
-	rc = as_batch_create_thread_queues(0, threads);
+	rc = as_batch_create_thread_queues(0, g_config.n_batch_index_threads);
 
 	if (rc) {
 		return rc;
@@ -733,15 +744,13 @@ as_batch_queue_task(as_transaction* btr)
 	as_transaction_init_head(&tr, 0, 0);
 
 	tr.origin = FROM_BATCH;
-	tr.from.batch_shared = shared;
 	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
 
-	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
-
 	// Read batch keys and initialize generic transactions.
 	as_batch_input* in;
-	cl_msg* out = 0;
+	cl_msg* out = NULL;
+	cl_msg* prev_msgp = NULL;
 	as_msg_op* op;
 	uint32_t tran_row = 0;
 	uint8_t info = *data++;  // allow transaction inline.
@@ -757,12 +766,23 @@ as_batch_queue_task(as_transaction* btr)
 	while (tran_row < tran_count && data + BATCH_REPEAT_SIZE <= limit) {
 		// Copy transaction data before memory gets overwritten.
 		in = (as_batch_input*)data;
+
+		tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+
+		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
-		memcpy(&tr.keyd, &in->keyd, sizeof(cf_digest));
+		tr.keyd = in->keyd;
+		tr.benchmark_time = btr->benchmark_time; // must reset for each usage
 
 		if (in->repeat) {
+			if (! prev_msgp) {
+				break; // bad bytes from client - repeat set on first item
+			}
+
 			// Row should use previous namespace and bin names.
 			data += BATCH_REPEAT_SIZE;
+			tr.msgp = prev_msgp;
 		}
 		else {
 			// Row contains full namespace/bin names.
@@ -801,21 +821,21 @@ as_batch_queue_task(as_transaction* btr)
 				should_inline = ns && ns->storage_data_in_memory;
 			}
 			mf = as_msg_field_get_next(mf);
+			data = (uint8_t*)mf;
 
 			// Swap remaining fields.
 			for (uint16_t j = 1; j < out->msg.n_fields; j++) {
+				if (data + sizeof(as_msg_field) > limit) {
+					goto TranEnd;
+				}
+
 				if (mf->type == AS_MSG_FIELD_TYPE_SET) {
 					as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_SET);
 				}
 
 				as_msg_swap_field(mf);
 				mf = as_msg_field_get_next(mf);
-			}
-
-			data = (uint8_t*)mf;
-
-			if (data > limit) {
-				break;
+				data = (uint8_t*)mf;
 			}
 
 			if (out->msg.n_ops) {
@@ -829,10 +849,6 @@ as_batch_queue_task(as_transaction* btr)
 					as_msg_swap_op(op);
 					op = as_msg_op_get_next(op);
 					data = (uint8_t*)op;
-
-					if (data > limit) {
-						goto TranEnd;
-					}
 				}
 			}
 
@@ -841,16 +857,16 @@ as_batch_queue_task(as_transaction* btr)
 			out->proto.type = PROTO_TYPE_AS_MSG;
 			out->proto.sz = (data - (uint8_t*)&out->msg);
 			tr.msgp = out;
+			prev_msgp = out;
+		}
+
+		if (data > limit) {
+			break;
 		}
 
 		// Submit transaction.
 		if (should_inline) {
-			// Must copy generic transaction before processing inline, because some
-			// transaction fields are modified during the course of the transaction.
-			// We need each transaction to be initialized to proper values.
-			as_transaction tmp;
-			memcpy(&tmp, &tr, sizeof(as_transaction));
-			as_tsvc_process_transaction(&tmp);
+			as_tsvc_process_transaction(&tr);
 		}
 		else {
 			// Queue transaction to be processed by a transaction thread.
@@ -1080,7 +1096,7 @@ as_batch_threads_resize(uint32_t threads)
 			}
 			else {
 				// Show warning, but keep going as some threads may have been successfully added/removed.
-				cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%d",
+				cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%u",
 						status, g_config.n_batch_index_threads);
 				threads = batch_thread_pool.thread_size;
 
@@ -1101,7 +1117,7 @@ as_batch_threads_resize(uint32_t threads)
 				g_config.n_batch_index_threads = batch_thread_pool.thread_size;
 
 				if (status) {
-					cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%d",
+					cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%u",
 							status, g_config.n_batch_index_threads);
 				}
 			}
@@ -1114,6 +1130,11 @@ as_batch_threads_resize(uint32_t threads)
 void
 as_batch_queues_info(cf_dyn_buf* db)
 {
+	if (pthread_mutex_lock(&batch_resize_lock)) {
+		cf_warning(AS_BATCH, "Batch info resize lock failed");
+		return;
+	}
+
 	uint32_t max = batch_thread_pool.thread_size;
 
 	for (uint32_t i = 0; i < max; i++) {
@@ -1125,6 +1146,7 @@ as_batch_queues_info(cf_dyn_buf* db)
 		cf_dyn_buf_append_char(db, ':');
 		cf_dyn_buf_append_int(db, cf_queue_sz(bq->response_queue));  // Buffer count
 	}
+	pthread_mutex_unlock(&batch_resize_lock);
 }
 
 int

@@ -53,9 +53,11 @@
 // **************************************************************************************************
 #define AS_SINDEX_MAX_STRING_KSIZE 2048
 #define AS_SINDEX_MAX_GEOJSON_KSIZE (1024 * 1024)
-#define SINDEX_SMD_KEY_SIZE        AS_ID_INAME_SZ + AS_ID_NAMESPACE_SZ 
+#define OLD_SINDEX_SMD_KEY_SIZE    AS_ID_INAME_SZ + AS_ID_NAMESPACE_SZ
+#define SINDEX_SMD_KEY_SIZE        (AS_ID_NAMESPACE_SZ + AS_SET_NAME_MAX_SIZE + AS_SINDEX_MAX_PATH_LENGTH + 1 + 2 + 2)
 #define SINDEX_SMD_VALUE_SIZE      (AS_SMD_MAJORITY_CONSENSUS_KEYSIZE)
-#define SINDEX_MODULE              "sindex_module"
+#define OLD_SINDEX_MODULE          "sindex_module"
+#define SINDEX_MODULE              "sindex"
 #define AS_SINDEX_MAX_PATH_LENGTH  256
 #define AS_SINDEX_MAX_DEPTH        10
 #define AS_SINDEX_TYPE_STR_SIZE    20 // LIST / MAPKEYS / MAPVALUES / DEFAULT(NONE)
@@ -125,26 +127,10 @@ typedef enum {
 // **************************************************************************************************
 
 /*
- * SECONDARY INDEX KEY TYPES
- * NB: DO NOT CHANGE NUMBERING, it matches COL_TYPE* to track down weird 
- * behavior if it does not match.
+ * SECONDARY INDEX KEY TYPES same as COL_TYPE*
  */
 // **************************************************************************************************
-typedef enum {
-	AS_SINDEX_KTYPE_NONE   = 0,
-	AS_SINDEX_KTYPE_LONG   = 2, //Particle type INT
-	AS_SINDEX_KTYPE_FLOAT  = 4, //Particle type INT
-	AS_SINDEX_KTYPE_DIGEST = 10,
-	AS_SINDEX_KTYPE_GEO2DSPHERE = 12
-} as_sindex_ktype;
-#define AS_SINDEX_KTYPE_MAX_TO_STR_SZ 3
-
-typedef enum {
-	AS_SINDEX_KEY_TYPE_LONG   = 0,
-	AS_SINDEX_KEY_TYPE_DIGEST = 1,
-	AS_SINDEX_KEY_TYPE_GEO2DSPHERE = 2,
-	AS_SINDEX_KEY_TYPE_MAX    = 3
-} as_sindex_key_type;
+typedef uint8_t as_sindex_ktype;
 // **************************************************************************************************
 
 /*
@@ -161,18 +147,6 @@ typedef enum {
 	AS_SINDEX_ITYPE_MAX       = 4
 } as_sindex_type;
 #define AS_SINDEX_ITYPE_MAX_TO_STR_SZ 2
-// **************************************************************************************************
-
-/* 
- * Configuration parameter and control variable for secondary indexes
- */
-// **************************************************************************************************
-#define AS_SINDEX_CONFIG_IGNORE_ON_DESYNC     0x01
-// First byte
-// TODO REMOVE .. NOt being used
-#define IMD_FLAG_NO_RANGE_QUERY      0x0001
-// Fourth byte ..  TODO can remove
-#define IMD_FLAG_LOCKSET             0x0200
 // **************************************************************************************************
 
 /* 
@@ -232,19 +206,8 @@ typedef struct as_sindex_stat_s {
 	histogram *       _query_diff_hist;       // Histogram to track the false positives found by queries
 } as_sindex_stat;
 
-typedef struct as_sindex_config_var_s {
-	char 		name[AS_ID_INAME_SZ];
-	uint64_t    defrag_period;
-	uint32_t    defrag_max_units;
-	bool        enable_histogram; // default false;
-	uint16_t    ignore_not_sync_flag;
-	bool 		conf_valid_flag;
-}as_sindex_config_var;
-
 typedef struct as_sindex_config_s {
-	uint64_t    defrag_period;
-	uint32_t    defrag_max_units;
-	uint16_t    flag; // TODO change_name
+	volatile uint16_t  flag; // TODO change_name
 } as_sindex_config;
 
 // **************************************************************************************************
@@ -255,13 +218,8 @@ typedef struct as_sindex_config_s {
  */
 // **************************************************************************************************
 typedef struct as_sindex_physical_metadata_s {
-	// Static member. Does not need protection by lock
-	int                 tmatch;
-	int                 imatch;  // slot in Index array (Alchemy)
-
 	pthread_rwlock_t    slock;
-	// Need protection by lock
-	struct btree       *ibtr;    // Aerospike Index pointer
+	struct btree       *ibtr;
 } as_sindex_pmetadata;
 
 
@@ -287,16 +245,13 @@ typedef struct as_sindex_metadata_s {
 	char                * set;
 	char                * iname;
 	char                * bname;
-	unsigned char         dtype;   // Aerospike Index type
 	uint32_t              binid; // Redundant info to aid search
-	as_sindex_ktype       btype; // Same as Aerospike Index type
+	as_sindex_ktype       sktype; // Same as Aerospike Index type
 	as_sindex_type        itype;
 	int 				  post_op;
 	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
 	int                   path_length;
 	char                * path_str;
-	int                   bimatch; // imatch of 0th pimd
-	int                   tmatch;  // Aerospike Index to table(tmatch)
 	int                   nprts;   // Aerospike Index Number of Index partitions	
 } as_sindex_metadata;
 
@@ -307,18 +262,21 @@ typedef struct as_sindex_metadata_s {
 typedef struct as_sindex_s {
 	int                          simatch; //self, shash match by name
 	// Protected by SI_GWLOCK
-	byte                         state;
+	uint8_t                      state;
 	
 	// TODO : shift to imd
-	uint64_t                     flag;
+	volatile uint16_t            flag;
+	// No need to be volatile; little stale info
+	// about this is ok. And it is not checked
+	// in busy loop
+	bool                         enable_histogram; // default false;
+
 	as_namespace                *ns;
-	cf_atomic_int                desync_cnt;
 
 	// Protected by si reference
 	struct as_sindex_metadata_s *imd;
 	struct as_sindex_metadata_s *new_imd;
 
-	bool                         enable_histogram; // default false;
 	as_sindex_stat               stats;
 	as_sindex_config             config;
 } as_sindex;
@@ -428,7 +386,7 @@ typedef struct as_sindex_query_context_s {
  *  [startl, endl]
  */
 typedef struct as_sindex_range_s {
-	byte                num_binval;
+	uint8_t             num_binval;
 	bool                isrange;
 	as_sindex_bin_data  start;
 	as_sindex_bin_data  end;
@@ -502,7 +460,7 @@ extern int  as_sindex_boot_populateall();
  * 
 */
 // **************************************************************************************************
-extern int  as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create);
+extern int  as_sindex_create(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_update(as_sindex_metadata *imd);
 extern void as_sindex_destroy_pmetadata(as_sindex *si);
@@ -563,13 +521,11 @@ void                        as_sindex_delete_set(as_namespace * ns, char * set_n
 // **************************************************************************************************
 extern int  as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db);
 extern int  as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db);
-extern int  as_sindex_repair(as_namespace *ns, char * iname);
 extern int  as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params);
+extern void as_sindex_dump(char *nsname, char *iname, char *fname, bool verbose);
 extern void as_sindex_gconfig_default(struct as_config_s *c);
 extern int  as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
 			bool is_create, bool *is_smd_op, char * cmd);
-void        as_sindex_config_var_default(as_sindex_config_var *si_cfg);
-int         as_sindex_cfg_var_hash_reduce_fn(void *key, void *data, void *udata);
 void        as_sindex__config_default(as_sindex *si);
 void        as_sindex_ticker_start(as_namespace * ns, as_sindex * si);
 void        as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint64_t start_time);
@@ -611,7 +567,7 @@ extern int         as_sindex_query(as_sindex *si, as_sindex_range *range, as_sin
 extern int         as_sindex_range_free(as_sindex_range **srange);
 extern int         as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **srange);
 extern int         as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange);
-extern int         as_sindex_assert_query(as_sindex *si, as_sindex_range *srange);
+extern bool        as_sindex_can_query(as_sindex *si);
 extern as_sindex * as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
 extern as_sindex * as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange);
 extern int         as_index_keys_reduce_fn(cf_ll_element *ele, void *udata);
@@ -652,52 +608,51 @@ do { \
 	if (ret) cf_warning(AS_SINDEX, "GWLOCK(%d) %s:%d", ret, __FILE__, __LINE__); \
 } while (0);
 
-#define SINDEX_GUNLOCK()        \
+#define SINDEX_GRUNLOCK()        \
 do { \
 	int ret = pthread_rwlock_unlock(&g_sindex_rwlock); \
-	if (ret) cf_warning(AS_SINDEX, "GUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
+	if (ret) cf_warning(AS_SINDEX, "GRUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
 } while (0);
 
-#define SINDEX_RLOCK(l)          \
+#define SINDEX_GWUNLOCK()        \
+do { \
+	int ret = pthread_rwlock_unlock(&g_sindex_rwlock); \
+	if (ret) cf_warning(AS_SINDEX, "GWUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
+} while (0);
+
+#define PIMD_RLOCK(l)          \
 do {                                            \
 	int ret = pthread_rwlock_rdlock((l));        \
 	if (ret) cf_warning(AS_SINDEX, "RLOCK_ONLY (%d) %s:%d", ret, __FILE__, __LINE__); \
 } while(0);
 
-#define SINDEX_WLOCK(l)                       \
+#define PIMD_WLOCK(l)                       \
 do {                                            \
 	int ret = pthread_rwlock_wrlock((l));        \
 	if (ret) cf_warning(AS_SINDEX, "WLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
 } while(0);
-#define SINDEX_UNLOCK(l)                      \
+
+#define PIMD_RUNLOCK(l)							\
 do {                                            \
 	int ret = pthread_rwlock_unlock((l));        \
-	if (ret) cf_warning(AS_SINDEX, "UNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
+	if (ret) cf_warning(AS_SINDEX, "RUNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
 } while(0);
-// **************************************************************************************************
 
+#define PIMD_WUNLOCK(l)							\
+do {                                            \
+	int ret = pthread_rwlock_unlock((l));        \
+	if (ret) cf_warning(AS_SINDEX, "WUNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
+} while(0);
 
-/*
- * INLINES
- *
- * Hash function that takes a sindex-name and returns a uint64_t hash, 
- * meant for hashing name to a as_sindex_config_var structure. 
- */
 // **************************************************************************************************
-static inline uint32_t
-as_sindex_config_var_hash_fn(void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, strlen((const char *)p_key));
-}
-// **************************************************************************************************
-
 
 /*
  * APIs for SMD
  */
 // **************************************************************************************************
 extern bool g_sindex_smd_restored;
-extern int  as_sindex_smd_can_accept_cb(char* module, as_smd_item_t *item, void *udata);
+extern void as_sindex_imd_to_smd_key(const as_sindex_metadata *imd, char *smd_key);
+extern bool as_sindex_delete_imd_to_smd_key(as_namespace *ns, as_sindex_metadata *imd, char *smd_key);
 extern int  as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, 
 						uint32_t accept_opt);
 // **************************************************************************************************

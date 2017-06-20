@@ -60,10 +60,10 @@ delete_master(as_transaction* tr, rw_request* rw)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (0 != as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns)) {
+	if (0 != as_record_get(tr->rsv.tree, &tr->keyd, &r_ref)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 		return TRANS_DONE_ERROR;
 	}
 
-	return drop_master(tr, &r_ref);
+	return drop_master(tr, &r_ref, rw);
 }
