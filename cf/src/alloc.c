@@ -121,6 +121,23 @@ hook_get_arena(const void *p)
 	return arena[0];
 }
 
+static void
+hook_check_arena(const void *p, int32_t arena)
+{
+	int32_t arena_p = hook_get_arena(p);
+
+	if (arena < 0 && arena_p < N_ARENAS) {
+		return;
+	}
+
+	if (arena == arena_p) {
+		return;
+	}
+
+	size_t jem_sz = jem_sallocx(p, 0);
+	cf_crash(CF_ALLOC, "arena change for %zu@%p: %d -> %d", jem_sz, p, arena_p, arena);
+}
+
 static pid_t
 hook_gettid(void)
 {
@@ -756,6 +773,8 @@ do_rallocx(void *p, size_t sz, int32_t arena, const void *ra)
 	if (p == NULL) {
 		return do_mallocx(sz, arena, ra);
 	}
+
+	hook_check_arena(p, arena);
 
 	if (sz == 0) {
 		do_free(p, ra);
