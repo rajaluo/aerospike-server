@@ -324,16 +324,6 @@ static inline uint32_t as_msg_field_get_strncpy(as_msg_field *f, char *dst, int 
 	}
 }
 
-typedef struct as_msg_key_s {
-	as_msg_field	f;
-	uint8_t			key[];
-} __attribute__ ((__packed__)) as_msg_key;
-
-typedef struct as_msg_number_s {
-	as_msg_field	f;
-	uint32_t		number;
-} __attribute__ ((__packed__)) as_msg_number;
-
 typedef struct as_msg_s {
 	/*00 [x00] (08) */	uint8_t		header_sz;	// number of bytes in this header - 22
 	/*01 [x01] (09) */	uint8_t		info1;		// bitfield about this request

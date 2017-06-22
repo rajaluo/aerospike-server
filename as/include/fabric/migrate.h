@@ -60,10 +60,6 @@ typedef enum {
 #define TX_FLAGS_NONE           ((uint32_t) 0x0)
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
 
-// If 0 then it is a migration start from an old node.
-#define MIG_TYPE_START_IS_NORMAL 1
-#define MIG_TYPE_START_IS_REQUEST 2
-
 #define AS_MIGRATE_RX_STATE_SUBRECORD 1
 #define AS_MIGRATE_RX_STATE_RECORD 2
 typedef uint8_t as_partition_mig_rx_state;
