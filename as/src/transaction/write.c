@@ -323,8 +323,6 @@ write_dup_res_cb(rw_request* rw)
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
-	CF_ALLOC_SET_NS_ARENA(rw->rsv.ns);
-
 	transaction_status status = write_master(rw, &tr);
 
 	BENCHMARK_NEXT_DATA_POINT((&tr), write, master);
@@ -488,6 +486,8 @@ write_timeout_cb(rw_request* rw)
 transaction_status
 write_master(rw_request* rw, as_transaction* tr)
 {
+	CF_ALLOC_SET_NS_ARENA(tr->rsv.ns);
+
 	//------------------------------------------------------
 	// Perform checks that don't need to loop over ops, or
 	// create or find (and lock) the as_index.

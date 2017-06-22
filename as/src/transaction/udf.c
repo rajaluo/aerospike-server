@@ -455,8 +455,6 @@ udf_dup_res_cb(rw_request* rw)
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
-	CF_ALLOC_SET_NS_ARENA(rw->rsv.ns);
-
 	transaction_status status = udf_master(rw, &tr);
 
 	BENCHMARK_NEXT_DATA_POINT((&tr), udf, master);
@@ -633,6 +631,8 @@ udf_timeout_cb(rw_request* rw)
 transaction_status
 udf_master(rw_request* rw, as_transaction* tr)
 {
+	CF_ALLOC_SET_NS_ARENA(tr->rsv.ns);
+
 	rw->has_udf = true;
 
 	udf_def def;

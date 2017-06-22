@@ -225,8 +225,6 @@ as_tsvc_process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
-	CF_ALLOC_SET_NS_ARENA(ns);
-
 	// Have we finished the very first partition balance?
 	if (! as_partition_balance_is_init_resolved()) {
 		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
