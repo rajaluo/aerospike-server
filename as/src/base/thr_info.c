@@ -6038,7 +6038,6 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		cf_warning(AS_INFO, "%s : Failed. internal error", cmd);
 		return AS_SINDEX_ERR_PARAM;
 	}
-	imd->post_op     = 0;
 
 	char indexname_str[AS_ID_INAME_SZ];
 	int  indname_len  = sizeof(indexname_str);

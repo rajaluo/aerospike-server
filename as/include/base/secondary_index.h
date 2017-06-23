@@ -248,7 +248,6 @@ typedef struct as_sindex_metadata_s {
 	uint32_t              binid; // Redundant info to aid search
 	as_sindex_ktype       sktype; // Same as Aerospike Index type
 	as_sindex_type        itype;
-	int 				  post_op;
 	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
 	int                   path_length;
 	char                * path_str;
@@ -275,7 +274,7 @@ typedef struct as_sindex_s {
 
 	// Protected by si reference
 	struct as_sindex_metadata_s *imd;
-	struct as_sindex_metadata_s *new_imd;
+	struct as_sindex_metadata_s *recreate_imd;
 
 	as_sindex_stat               stats;
 	as_sindex_config             config;
@@ -462,7 +461,7 @@ extern int  as_sindex_boot_populateall();
 // **************************************************************************************************
 extern int  as_sindex_create(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd);
-extern int  as_sindex_update(as_sindex_metadata *imd);
+extern int  as_sindex_recreate(as_sindex_metadata *imd);
 extern void as_sindex_destroy_pmetadata(as_sindex *si);
 // **************************************************************************************************
 

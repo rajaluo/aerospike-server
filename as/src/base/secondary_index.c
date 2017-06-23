@@ -374,14 +374,12 @@ as_sindex_can_query(as_sindex *si)
  * used by index create by user at runtime or index creation at the boot time
  */
 void
-as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd,
-		bool refcounted)
+as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd)
 {
 	if (!imd) return;
-	as_sindex_metadata *qimdp;
 
-	if (refcounted) qimdp = cf_rc_alloc(sizeof(as_sindex_metadata));
-	else            qimdp = cf_malloc(  sizeof(as_sindex_metadata));
+	as_sindex_metadata *qimdp = cf_rc_alloc(sizeof(as_sindex_metadata));
+
 	memset(qimdp, 0, sizeof(as_sindex_metadata));
 
 	qimdp->ns_name = cf_strdup(imd->ns_name);
@@ -829,11 +827,11 @@ as_sindex_arr_lookup_by_setname_lockfree(as_namespace * ns, const char *setname,
 		if (!as_sindex_isactive(si)) {
 			continue;
 		}
-	
+
 		if (!as_sindex__setname_match(si->imd, setname)) {
 			continue;
 		}
-	
+
 		AS_SINDEX_RESERVE(si);
 
 		si_arr[sindex_count++] = si;
@@ -852,7 +850,7 @@ as_sindex__simatch_by_iname(as_namespace *ns, char *idx_name)
 	strcpy(iname, idx_name);
 
 	int simatch = -1;
-	int rv      = shash_get(ns->sindex_iname_hash, (void *)iname, (void *)&simatch);
+	int rv = shash_get(ns->sindex_iname_hash, (void *)iname, (void *)&simatch);
 	cf_detail(AS_SINDEX, "Found iname simatch %s->%d rv=%d", iname, simatch, rv);
 
 	if (rv) {
@@ -956,39 +954,7 @@ as_sindex_lookup_by_defns_lockfree(as_namespace *ns, char *set, int binid, as_si
 	return as_sindex__lookup_lockfree(ns, NULL, set, binid, type, itype, path, flag);
 }
 
-/*
- * Description     : Checks whether an index with the same defn already exists.
- *                   Index defn ={index_name, bin_name, bintype, set_name, ns_name}
- *
- * Parameters      : ns  -> namespace in which index is created
- *                   imd -> imd for create request (does not have binid populated)
- *
- * Returns         : true  if index with the given defn already exists.
- *                   false otherwise
- *
- * Synchronization : Required lock acquired by lookup functions.
- */
-bool
-as_sindex_exists_by_defn(as_namespace* ns, as_sindex_metadata* imd)
-{
-	char *iname    = imd->iname;
-	// This will reserve the si
-	as_sindex * si = as_sindex_lookup_by_iname(ns, iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
-	if(!si) {
-		return false;
-	}
-	int binid     = as_bin_get_id(ns, imd->bname);
-	if(si->imd->bname && imd->bname) {
-		if (binid == si->imd->binid && !strcmp(imd->bname, si->imd->bname)
-						&& imd->sktype == si->imd->sktype) {
-			AS_SINDEX_RELEASE(si);
-			return true;
-		}
-	}
 
-	AS_SINDEX_RELEASE(si);
-	return false;
-}
 //                                           END LOOKUP
 // ************************************************************************************************
 // ************************************************************************************************
@@ -1433,7 +1399,6 @@ as_sindex__create_pmeta(as_sindex *si, int simatch, int nptr)
 			cf_crash(AS_SINDEX,
 					"Could not create secondary index dml mutex ");
 		}
-	
 	}
 }
 
@@ -1483,19 +1448,9 @@ END:
     return ret;
 }
 
-int
-as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
+static int
+sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
 {
-	int ret = AS_SINDEX_ERR;
-	// Ideally there should be one lock per namespace, but because the
-	// Aerospike Index metadata is single global structure we need a overriding
-	// lock for that. NB if it becomes per namespace have a file lock
-	SINDEX_GWLOCK();
-	if (as_sindex_lookup_by_iname_lockfree(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_NORESERVE)) {
-		cf_detail(AS_SINDEX,"Index %s already exists", imd->iname);
-		SINDEX_GWUNLOCK();
-		return AS_SINDEX_ERR_FOUND;
-	}
 	int chosen_id = AS_SINDEX_MAX;
 	as_sindex *si = NULL;
 	for (int i = 0; i < AS_SINDEX_MAX; i++) {
@@ -1506,9 +1461,8 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 		}
 	}
 
-	if (!si || (chosen_id == AS_SINDEX_MAX))  {
+	if (! si || (chosen_id == AS_SINDEX_MAX))  {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Maxed out secondary index limit no more indexes allowed");
-		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 
@@ -1517,7 +1471,6 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 	if (imd->set) {
 		if (as_namespace_get_create_set_w_len(ns, imd->set, strlen(imd->set), &p_set, NULL) != 0) {
 			cf_warning(AS_SINDEX, "SINDEX CREATE : failed get-create set %s", imd->set);
-			SINDEX_GWUNLOCK();
 			return AS_SINDEX_ERR;
 		}
 	}
@@ -1529,14 +1482,12 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 
 	if (as_sindex__populate_binid(ns, imd)) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Popluating bin id failed");
-		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR_PARAM;
 	}
 
 	as_sindex_status rv = as_sindex__put_in_set_binid_hash(ns, imd->set, imd->binid, id);
 	if (rv != AS_SINDEX_OK) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Put in set_binid hash fails with error %d", rv);
-		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 
@@ -1547,13 +1498,12 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 	snprintf(iname, strlen(imd->iname)+1, "%s", imd->iname);
 	if (SHASH_OK != shash_put(ns->sindex_iname_hash, (void *)iname, (void *)&chosen_id)) {
 		cf_warning(AS_SINDEX, "Internal error ... Duplicate element found sindex iname hash [%s %s]",
-						imd->iname, as_bin_get_name_from_id(ns, imd->binid));
+				imd->iname, as_bin_get_name_from_id(ns, imd->binid));
 
 		rv = as_sindex__delete_from_set_binid_hash(ns, imd);
 		if (rv) {
 			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
 		}
-		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 	cf_detail(AS_SINDEX, "Put iname simatch %s:%zu->%d", iname, strlen(imd->iname), chosen_id);
@@ -1563,11 +1513,11 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 	si->simatch     = chosen_id;
 	si->state       = AS_SINDEX_ACTIVE;
 	si->flag        = AS_SINDEX_FLAG_WACTIVE;
-	si->new_imd     = NULL;
+	si->recreate_imd     = NULL;
 	as_sindex__config_default(si);
 
 	// Init IMD
-	as_sindex__dup_meta(imd, &qimd, true);
+	as_sindex__dup_meta(imd, &qimd);
 	si->imd = qimd;
 	qimd->si = si;
 
@@ -1596,12 +1546,116 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 		int rv = cf_queue_push(g_sindex_populate_q, &si);
 		if (CF_QUEUE_OK != rv) {
 			cf_warning(AS_SINDEX, "Failed to queue up for population... index=%s "
-						"Internal Queue Error rv=%d, try dropping and recreating",
-						si->imd->iname, rv);
+					"Internal Queue Error rv=%d, try dropping and recreating",
+					si->imd->iname, rv);
 		}
 	}
+
+	return AS_SINDEX_OK;
+}
+
+int
+as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
+{
+	// Ideally there should be one lock per namespace, but because the
+	// Aerospike Index metadata is single global structure we need a overriding
+	// lock for that. NB if it becomes per namespace have a file lock
+	SINDEX_GWLOCK();
+	if (as_sindex_lookup_by_iname_lockfree(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_NORESERVE)) {
+		cf_detail(AS_SINDEX,"Index %s already exists", imd->iname);
+		SINDEX_GWUNLOCK();
+		return AS_SINDEX_ERR_FOUND;
+	}
+
+	int rv = sindex_create_lockless(ns, imd);
 	SINDEX_GWUNLOCK();
-	return ret;
+	return rv;
+}
+
+void
+as_sindex_smd_create(as_namespace *ns, as_sindex_metadata *imd)
+{
+	SINDEX_GWLOCK();
+
+	// FIXME - wrong place for check
+	// If one node cannot have > AS_SINDEX_MAX then neither
+	// can majority in cluster.
+	// if (ns->sindex_cnt >= AS_SINDEX_MAX) {
+	//     cf_warning(AS_SINDEX, "Failed to SMD create index '%s' on namespace '%s', maximum allowed number of indexes %d reached !!",
+	//			imd->ns_name, imd->iname, ns->sindex_cnt);
+	//     SINDEX_GWUNLOCK();
+	//	   return;
+	// }
+
+	bool found_exact_defn = false; // ns:iname   ns:binid / set / sktype / itype / path_str
+	bool found_defn = false;       //            ns:binid / set / sktype / itype / path_str
+	bool found_iname = false;      // ns:iname
+
+	int simatch_defn = -1;
+	int16_t binid = as_bin_get_id(ns, imd->bname);
+	if (binid != -1) {
+		simatch_defn = as_sindex__simatch_by_set_binid(ns, imd->set, binid,
+				imd->sktype, imd->itype, imd->path_str);
+		if (simatch_defn != -1) {
+			as_sindex *si = &ns->sindex[simatch_defn];
+			if (! strcmp(si->imd->iname, imd->iname)) {
+				found_exact_defn = true;
+			} else {
+				found_defn = true;
+			}
+		}
+	}
+
+	int simatch_iname = as_sindex__simatch_by_iname(ns, imd->iname);
+	if (simatch_iname != -1) {
+		found_iname = true;
+	}
+
+	if (found_exact_defn) {
+		as_sindex *si = &ns->sindex[simatch_defn];
+		if (si->state == AS_SINDEX_ACTIVE) {
+			SINDEX_GWUNLOCK();
+			return;
+		}
+	}
+
+	if (found_defn) {
+		as_sindex *si = &ns->sindex[simatch_defn];
+		if (si->state == AS_SINDEX_ACTIVE) {
+			si->state = AS_SINDEX_DESTROY;
+			as_sindex_reset_binid_has_sindex(ns, si->imd->binid);
+			AS_SINDEX_RELEASE(si);
+		}
+	}
+
+	if (found_iname) {
+		as_sindex *si = &ns->sindex[simatch_iname];
+		if (si->state == AS_SINDEX_ACTIVE) {
+			si->state = AS_SINDEX_DESTROY;
+			as_sindex_reset_binid_has_sindex(ns, si->imd->binid);
+			AS_SINDEX_RELEASE(si);
+		}
+	}
+
+	// If found set setop; Use si found with same definition to set op.
+	if (found_defn || found_exact_defn || found_iname) {
+		if (simatch_defn != -1) {
+			as_sindex *si = &ns->sindex[simatch_defn];
+			as_sindex__dup_meta(imd, &si->recreate_imd);
+			SINDEX_GWUNLOCK();
+			return;
+		}
+
+		as_sindex *si = &ns->sindex[simatch_iname];
+		as_sindex__dup_meta(imd, &si->recreate_imd);
+		SINDEX_GWUNLOCK();
+		return;
+	}
+
+	// Not found.
+	sindex_create_lockless(ns, imd);
+	SINDEX_GWUNLOCK();
+	return;
 }
 
 /*
@@ -1614,7 +1668,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
  * Synchronization : Does not explicitly take any locks
  */
 int
-as_sindex_update(as_sindex_metadata* imd)
+as_sindex_recreate(as_sindex_metadata* imd)
 {
 	as_namespace *ns = as_namespace_get_byname(imd->ns_name);
 	int ret          = as_sindex_create(ns, imd);
@@ -1681,27 +1735,21 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 	}
 
 	if (si) {
-		if (imd->post_op == 1) {
-			as_sindex__dup_meta(imd, &si->new_imd, false);
-		}
-		else {
-			si->new_imd = NULL;
-		}
 		si->state = AS_SINDEX_DESTROY;
 		as_sindex_reset_binid_has_sindex(ns, si->imd->binid);
 		AS_SINDEX_RELEASE(si);
 		SINDEX_GWUNLOCK();
 		return AS_SINDEX_OK;
-	} else {
-		SINDEX_GWUNLOCK();
-		return AS_SINDEX_ERR_NOTFOUND;
 	}
+
+	SINDEX_GWUNLOCK();
+	return AS_SINDEX_ERR_NOTFOUND;
 }
 
 // On emptying a index
 // 		reset objects and keys
-// 		reset memory used 
-// 		add previous number of objects as deletes 
+// 		reset memory used
+// 		add previous number of objects as deletes
 void
 as_sindex_clear_stats_on_empty_index(as_sindex *si)
 {
@@ -3095,7 +3143,7 @@ as_sindex_add_geo2dsphere_from_as_val(as_val *val, as_sindex_bin *sbin)
 	if (!g) {
 		return AS_SINDEX_ERR;
 	}
-	
+
 	const char *s = as_geojson_get(g);
 	size_t jsonsz = as_geojson_len(g);
 	uint64_t parsed_cellid = 0;
@@ -4330,24 +4378,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 
 		if (item->action == AS_SMD_ACTION_SET) {
 			smd_value_to_imd(item->value, &imd); // sets index name
-
-			if (as_sindex_exists_by_defn(ns, &imd)) {
-				cf_detail(AS_SINDEX, "index with the same definition already exists");
-				as_sindex_imd_free(&imd);
-				continue;
-			}
-
-			// Pessimistic - check was already done at SMD entry point.
-			int retval = as_sindex_create_check_params(ns, &imd);
-
-			if (retval != AS_SINDEX_OK) {
-					cf_warning(AS_SINDEX, "index creation failed - error %d - dropping index due to cluster state change", retval);
-					imd.post_op = 1; // leads to sindex recreation
-					as_sindex_destroy(ns, &imd);
-			}
-			else {
-				as_sindex_create(ns, &imd);
-			}
+			as_sindex_smd_create(ns, &imd);
 		}
 		else if (item->action == AS_SMD_ACTION_DELETE) {
 			as_sindex_destroy(ns, &imd);
