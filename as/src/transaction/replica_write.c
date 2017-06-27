@@ -1096,7 +1096,14 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	}
 
 	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0 ||
-			(is_create && record_has_sindex(r, ns));
+			// Because replica write arriving on empty node (before migration)
+			// may not have above flag set if master write didn't touch sindex.
+			// Note - can't use record_has_sindex() here since r won't yet have
+			// set-id.
+			// TODO - refactor to be able to use set-id.
+			// TODO - missing replica writes that would have touched sindex must
+			// be accounted for when we implement re-replication.
+			(is_create && as_sindex_ns_has_sindex(ns));
 
 	rd.ignore_record_on_device = ! has_sindex && ! is_ldt_parent;
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
