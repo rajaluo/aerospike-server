@@ -299,7 +299,6 @@ static void fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint
 static void fabric_recv_thread_pool_add_fc(fabric_recv_thread_pool *pool, fabric_connection *fc);
 
 // fabric_endpoint
-static int fabric_endpoint_list_legacy_get(cf_node nodeid, as_endpoint_list *endpoint_list, size_t *endpoint_list_size);
 static int fabric_endpoint_list_get(cf_node nodeid, as_endpoint_list *endpoint_list, size_t *endpoint_list_size);
 static bool fabric_connect_endpoint_filter(const as_endpoint *endpoint, void *udata);
 
@@ -2017,38 +2016,6 @@ fabric_recv_thread_pool_add_fc(fabric_recv_thread_pool *pool,
 // input endpoint_list_size is less than actual size. Var endpoint_list_size
 // will be updated with the required capacity.
 static int
-fabric_endpoint_list_legacy_get(cf_node nodeid, as_endpoint_list *endpoint_list,
-		size_t *endpoint_list_size)
-{
-	cf_sock_cfg cfg;
-	cf_sock_cfg_init(&cfg, CF_SOCK_OWNER_FABRIC);
-
-	if (as_hb_getaddr(nodeid, &cfg.addr)) {
-		errno = ENOENT;
-		return -1;
-	}
-
-	cf_ip_port_from_node_id(nodeid, &cfg.port);
-
-	if (*endpoint_list_size < 256) {
-		*endpoint_list_size = 256;
-		errno = ENOMEM;
-		return -1;
-	}
-
-	// Create endpoint list for a single node.
-	endpoint_list->n_endpoints = 1;
-	as_endpoint_from_sock_cfg_fill(&cfg, &endpoint_list->endpoints[0]);
-
-	return 0;
-}
-
-// Get the endpoint list to connect to the remote node.
-// Returns 0 on success and -1 on error, where errno will be set to  ENOENT if
-// there is no endpoint list could be obtained for this node and ENOMEM if the
-// input endpoint_list_size is less than actual size. Var endpoint_list_size
-// will be updated with the required capacity.
-static int
 fabric_endpoint_list_get(cf_node nodeid, as_endpoint_list *endpoint_list,
 		size_t *endpoint_list_size)
 {
@@ -2065,14 +2032,11 @@ fabric_endpoint_list_get(cf_node nodeid, as_endpoint_list *endpoint_list,
 			return 0;
 		}
 
-		return fabric_endpoint_list_legacy_get(nodeid, endpoint_list,
-				endpoint_list_size);
+		return -1;
 	}
 
 	if (errno == ENOENT) {
-		// Try the legacy mechanism.
-		return fabric_endpoint_list_legacy_get(nodeid, endpoint_list,
-				endpoint_list_size);
+		return -1;
 	}
 
 	// Not enough allocated memory.

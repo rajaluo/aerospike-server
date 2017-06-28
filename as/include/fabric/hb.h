@@ -71,8 +71,6 @@ typedef enum as_hb_protocol_enum
 	AS_HB_PROTOCOL_UNDEF,
 	AS_HB_PROTOCOL_NONE,
 	AS_HB_PROTOCOL_RESET,
-	AS_HB_PROTOCOL_V1,
-	AS_HB_PROTOCOL_V2,
 	AS_HB_PROTOCOL_V3
 } as_hb_protocol;
 
@@ -104,12 +102,6 @@ typedef enum
 	 */
 	AS_HB_PLUGIN_FABRIC,
 	/**
-	 * The older clustering subsystem.
-	 * TODO: Use only one plugin id and register differently based on the
-	 * clustering version.
-	 */
-	AS_HB_PLUGIN_PAXOS,
-	/**
 	 * The clustering subsystem.
 	 */
 	AS_HB_PLUGIN_CLUSTERING,
@@ -120,79 +112,25 @@ typedef enum
 } as_hb_plugin_id;
 
 /**
- * The fields in the heartbeat message. V2 protocol is frozen. Should never
- * change.
- */
-typedef enum
-{
-	AS_HB_V2_MSG_ID = 0,
-	AS_HB_V2_MSG_TYPE = 1,
-	AS_HB_V2_MSG_NODE = 2,
-	AS_HB_V2_MSG_ADDR = 3,
-	AS_HB_V2_MSG_PORT = 4,
-
-	/**
-	 * For pulse messages contains the node ids of the succession list.
-	 */
-	AS_HB_V2_MSG_ANV = 5,
-
-	/**
-	 * Legacy max cluster size and hence the length of the succession list as
-	 * well.
-	 */
-	AS_HB_V2_MSG_ANV_LENGTH = 6,
-
-	/**
-	 * -----------------------------------------------------------------
-	 * Internal fields not sent on the wire but present to make the a v2 message
-	 * look more like a v3 message as the code is v3 oriented.
-	 * -----------------------------------------------------------------
-	 */
-
-	/**
-	 * Compatibility as_endpoint_list field never send out on the wire. Used to
-	 * make the a v2 message work seamlessly with v3 oriented code.
-	 */
-	AS_HB_V2_MSG_COMPAT_ENDPOINTS = 7,
-
-	/**
-	 * Compatibility as_endpoint_list field never send out on the wire. Used to
-	 * make the a v2 message work seamlessly with v3 oriented code.
-	 */
-	AS_HB_V2_MSG_COMPAT_INFO_REQUEST = 8,
-
-	/**
-	 * Compatibility as_endpoint_list field never send out on the wire. Used to
-	 * make the a v2 message work seamlessly with v3 oriented code.
-	 */
-	AS_HB_V2_MSG_COMPAT_INFO_REPLY = 9,
-
-	/**
-	 * Sentinel value. Should be the last in the enum.
-	 */
-	AS_HB_V2_MSG_SENTINEL = 10
-
-} as_hb_v2_msg_fields;
-
-/**
  * The fields in the heartbeat message.
  * New field additions only at the end.
  */
 typedef enum
 {
+	/**
+	 * HB protocol identifier.
+	 */
+	AS_HB_MSG_ID,
 
 	/**
-	 * -----------------------------------------------------------------
-	 * Same meaning and order as v2 fields
-	 * -----------------------------------------------------------------
+	 * HB subsystem message type.
 	 */
-	AS_HB_MSG_ID, AS_HB_MSG_TYPE, AS_HB_MSG_NODE,
+	AS_HB_MSG_TYPE,
 
 	/**
-	 * -----------------------------------------------------------------
-	 * Fields specific to v3 but compulsory
-	 * -----------------------------------------------------------------
+	 * HB message source.
 	 */
+	AS_HB_MSG_NODE,
 
 	/**
 	 * Cluster Name.
@@ -243,8 +181,6 @@ typedef enum
 	 */
 	AS_HB_MSG_PAXOS_DATA
 } as_hb_msg_fields;
-
-
 
 /**
  * Heartbeat subsystem configuration.
@@ -440,13 +376,9 @@ void as_hb_shutdown();
 
 bool as_hb_node_is_adjacent(cf_node nodeid);
 
-int as_hb_getaddr(cf_node node, cf_ip_addr* addr);
-
 typedef void (*as_hb_event_fn)(int nevents, as_hb_event_node* events, void* udata);
 
 void as_hb_register_listener(as_hb_event_fn event_callback, void* udata);
-
-int as_hb_get_corrective_events(cf_node* succession, size_t succession_size, as_hb_event_node* events, size_t max_events);
 
 void as_hb_dump(bool verbose);
 
