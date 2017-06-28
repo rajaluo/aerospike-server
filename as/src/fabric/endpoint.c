@@ -188,7 +188,7 @@ as_endpoint_connect(const as_endpoint* endpoint, cf_sock_owner owner, int32_t ti
 	int rv = cf_socket_init_client(&cfg, timeout, sock);
 
 	// Reset the client sock config, because the config is a stack pointer.
-	sock->data = NULL;
+	sock->cfg = NULL;
 	return rv;
 }
 

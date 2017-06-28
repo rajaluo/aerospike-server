@@ -5006,7 +5006,7 @@ channel_multicast_msg_send(cf_socket* socket, uint8_t* buff,
 				CSFD(socket), mtu);
 	}
 
-	cf_msock_cfg* socket_cfg = (cf_msock_cfg*)(socket->data);
+	cf_msock_cfg* socket_cfg = (cf_msock_cfg*)(socket->cfg);
 	cf_sock_addr dest;
 	dest.port = socket_cfg->port;
 	cf_ip_addr_copy(&socket_cfg->addr, &dest.addr);

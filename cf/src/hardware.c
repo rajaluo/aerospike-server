@@ -623,7 +623,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 		cf_crash(CF_HARDWARE, "too many CPUs");
 	}
 
-	if (no_numa) {
+	if (a_numa_node != INVALID_INDEX && no_numa) {
 		cf_warning(CF_HARDWARE, "no NUMA information found in /sys");
 	}
 

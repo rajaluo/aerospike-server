@@ -447,7 +447,7 @@ thr_demarshal(void *unused)
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_stats.proto_connections_opened - g_stats.proto_connections_closed;
-				cf_sock_cfg *cfg = ssock->data;
+				cf_sock_cfg *cfg = ssock->cfg;
 				if (cfg->owner != CF_SOCK_OWNER_XDR && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
@@ -459,16 +459,9 @@ thr_demarshal(void *unused)
 					continue;
 				}
 
-				// Perform the TLS accept (no-op for non TLS sockets).
-				// NOTE - We can't do this until the non-blocking is
-				// set (inside cf_socket_accept above).
-				if (ssock->ssl) {
-					int rv = tls_socket_accept(ssock, &csock, &sa);
-					if (rv != 1) {
-						cf_socket_close(&csock);
-						cf_socket_term(&csock);
-						continue;
-					}
+				// Initialize the TLS part of the socket.
+				if (cfg->owner == CF_SOCK_OWNER_SERVICE_TLS) {
+					tls_socket_prepare(&g_config.tls_service, &csock, &sa);
 				}
 
 				// Create as_file_handle and queue it up in epoll_fd for further
@@ -553,6 +546,22 @@ thr_demarshal(void *unused)
 					cf_detail(AS_DEMARSHAL, "proto socket: remote close: fd %d event %x", CSFD(sock), events[i].events);
 					// no longer in use: out of epoll etc
 					goto NextEvent_FD_Cleanup;
+				}
+
+				if (tls_socket_needs_handshake(&fd_h->sock)) {
+					int32_t tls_ev = tls_socket_accept(&fd_h->sock);
+
+					if (tls_ev == EPOLLERR) {
+						goto NextEvent_FD_Cleanup;
+					}
+
+					if (tls_ev == 0) {
+						tls_ev = EPOLLIN;
+					}
+
+					cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
+							tls_ev | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+					goto NextEvent;
 				}
 
 				// If pointer is NULL, then we need to create a transaction and

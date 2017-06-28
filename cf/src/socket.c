@@ -597,7 +597,8 @@ void
 cf_socket_init(cf_socket *sock)
 {
 	sock->fd = -1;
-	sock->data = NULL;
+	sock->state = CF_SOCKET_STATE_NON_TLS;
+	sock->cfg = NULL;
 	tls_socket_init(sock);
 }
 
@@ -676,9 +677,7 @@ cf_socket_init_server(cf_serv_cfg *cfg, cf_sockets *socks)
 			goto cleanup2;
 		}
 
-		sock->data = &cfg->cfgs[n];
-
-		tls_socket_context(sock, &cfg->cfgs[n], cfg->spec);
+		sock->cfg = &cfg->cfgs[n];
 	}
 
 	socks->n_socks = n;
@@ -703,7 +702,7 @@ void
 cf_socket_show_server(cf_fault_context cont, const char *tag, const cf_sockets *socks)
 {
 	for (uint32_t i = 0; i < socks->n_socks; ++i) {
-		cf_sock_cfg *cfg = socks->socks[i].data;
+		cf_sock_cfg *cfg = socks->socks[i].cfg;
 		cf_sock_addr addr;
 		cf_sock_addr_from_addr_port(&cfg->addr, cfg->port, &addr);
 		cf_info(cont, "Started %s endpoint %s", tag, cf_sock_addr_print(&addr));
@@ -822,7 +821,7 @@ cf_socket_init_client(cf_sock_cfg *cfg, int32_t timeout, cf_socket *sock)
 		goto cleanup1;
 	}
 
-	sock->data = cfg;
+	sock->cfg = cfg;
 	res = 0;
 	goto cleanup0;
 
@@ -867,7 +866,7 @@ cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr)
 	cf_socket_disable_blocking(sock);
 	cf_socket_disable_nagle(sock);
 
-	sock->data = lsock->data;
+	sock->cfg = lsock->cfg;
 	res = 0;
 
 cleanup0:
@@ -1372,7 +1371,7 @@ cf_socket_mcast_init(cf_mserv_cfg *cfg, cf_sockets *socks)
 			goto cleanup2;
 		}
 
-		sock->data = &cfg->cfgs[n];
+		sock->cfg = &cfg->cfgs[n];
 	}
 
 	socks->n_socks = n;
@@ -1397,7 +1396,7 @@ void
 cf_socket_mcast_show(cf_fault_context cont, const char *tag, const cf_sockets *socks)
 {
 	for (uint32_t i = 0; i < socks->n_socks; ++i) {
-		cf_msock_cfg *cfg = socks->socks[i].data;
+		cf_msock_cfg *cfg = socks->socks[i].cfg;
 		cf_sock_addr addr;
 		cf_sock_addr_from_addr_port(&cfg->if_addr, cfg->port, &addr);
 		cf_info(cont, "Started %s endpoint %s", tag, cf_sock_addr_print(&addr));

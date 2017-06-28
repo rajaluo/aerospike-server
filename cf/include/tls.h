@@ -37,13 +37,20 @@ void tls_socket_term(cf_socket *sock);
 
 void tls_config_context(cf_serv_spec *spec);
 
-void tls_socket_context(cf_socket *sock, cf_sock_cfg *cfg, const cf_serv_spec *spec);
-
 int tls_socket_shutdown(cf_socket *sock);
 
 void tls_socket_close(cf_socket *sock);
 
-int tls_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *sa);
+void tls_socket_prepare(const cf_serv_spec *spec, cf_socket *sock, cf_sock_addr *sa);
+
+static inline bool tls_socket_needs_handshake(cf_socket *sock)
+{
+	return sock->state == CF_SOCKET_STATE_TLS_HANDSHAKE;
+}
+
+int tls_socket_accept(cf_socket *sock);
+
+int tls_socket_connect(cf_socket *sock);
 
 int tls_socket_recv(cf_socket *sock, void *buf, size_t sz, int32_t flags,
 					uint64_t timeout_msec);

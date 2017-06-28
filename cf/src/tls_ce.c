@@ -59,13 +59,6 @@ tls_config_context(cf_serv_spec *spec)
 {
 }
 
-void
-tls_socket_context(cf_socket *sock, cf_sock_cfg *cfg, const cf_serv_spec *spec)
-{
-	sock->ssl = NULL;
-	return;
-}
-
 int
 tls_socket_shutdown(cf_socket *sock)
 {
@@ -83,8 +76,21 @@ tls_socket_close(cf_socket *sock)
 	}
 }
 
+void
+tls_socket_prepare(const cf_serv_spec *spec, cf_socket *sock, cf_sock_addr *sa)
+{
+	cf_crash(CF_TLS, "unexpected TLS state");
+}
+
 int
-tls_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *sa)
+tls_socket_accept(cf_socket *sock)
+{
+	cf_crash(CF_TLS, "unexpected TLS state");
+	return 1;
+}
+
+int
+tls_socket_connect(cf_socket *sock)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return 1;

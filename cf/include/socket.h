@@ -116,9 +116,16 @@ typedef struct cf_sock_addr_s {
 	cf_ip_port port;
 } cf_sock_addr;
 
+typedef enum {
+	CF_SOCKET_STATE_NON_TLS,
+	CF_SOCKET_STATE_TLS_HANDSHAKE,
+	CF_SOCKET_STATE_TLS_READY
+} cf_socket_state;
+
 typedef struct cf_socket_s {
 	int32_t fd;
-	void *data;
+	cf_socket_state state;
+	void *cfg;
 	SSL *ssl;
 } cf_socket;
 
@@ -252,7 +259,8 @@ bool cf_socket_exists(cf_socket *sock);
 static inline void cf_socket_copy(const cf_socket *from, cf_socket *to)
 {
 	to->fd = from->fd;
-	to->data = from->data;
+	to->state = from->state;
+	to->cfg = from->cfg;
 	to->ssl = from->ssl;
 }
 
