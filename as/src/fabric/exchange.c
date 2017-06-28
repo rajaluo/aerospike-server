@@ -3001,15 +3001,6 @@ as_exchange_cluster_key()
 }
 
 /**
- * TEMPORARY - used by paxos only.
- */
-void
-as_exchange_cluster_key_set(uint64_t cluster_key)
-{
-	g_exchange.committed_cluster_key = (as_cluster_key)cluster_key;
-}
-
-/**
  * Member-access method.
  */
 uint32_t
@@ -3050,22 +3041,6 @@ as_exchange_info_get_succession(cf_dyn_buf* db)
 	cf_dyn_buf_append_string(db, "\nok");
 
 	EXCHANGE_UNLOCK();
-}
-
-/**
- * TEMPORARY - used by paxos only.
- */
-void
-as_exchange_succession_set(cf_node* succession, uint32_t cluster_size)
-{
-	vector_clear(&g_exchange.committed_succession_list);
-
-	for (uint32_t i = 0; i < cluster_size; i++) {
-		cf_vector_append(&g_exchange.committed_succession_list, &succession[i]);
-	}
-
-	g_exchange.committed_principal = cluster_size > 0 ? succession[0] : 0;
-	g_exchange.committed_cluster_size = cluster_size;
 }
 
 /**

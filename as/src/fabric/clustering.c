@@ -7649,60 +7649,6 @@ as_clustering_start()
 }
 
 /**
- * Start clustering subsystem via a switchover.
- *
- * @param cluster_key the existing cluster key.
- * @param cluster_size the current cluster size.
- * @param succession_list the current succession list.
- * @param sequence_numer the existing paxos sequence number, which is hlc
- * timestamp converted to seconds.
- */
-void
-as_clustering_switchover(uint64_t cluster_key, uint32_t cluster_size,
-		cf_node* succession_list, uint32_t sequence_number)
-{
-	if (clustering_is_running()) {
-		WARNING("clustering running - cannot switchover");
-		return;
-	}
-
-	// Prime the clustering state to start with the current cluster membership.
-	CLUSTERING_LOCK();
-
-	// Prime the register.
-	g_register.cluster_key = cluster_key;
-	g_register.sequence_number = (as_hlc_timestamp)(sequence_number * 1000);
-
-	vector_clear(&g_register.succession_list);
-	for (uint32_t i = 0; i < cluster_size; i++) {
-		cf_vector_append(&g_register.succession_list, &succession_list[i]);
-	}
-	g_register.cluster_modified_time = cf_getms();
-	g_register.cluster_modified_hlc_ts = as_hlc_timestamp_now();
-
-	g_register.state = AS_CLUSTERING_REGISTER_STATE_SYNCED;
-
-	// Prime the clustering state.
-	if (clustering_is_principal()) {
-		g_clustering.state = AS_CLUSTERING_STATE_PRINCIPAL;
-	}
-	else {
-		g_clustering.state = AS_CLUSTERING_STATE_NON_PRINCIPAL;
-	}
-	g_clustering.has_integrity = true;
-	g_clustering.preferred_principal = 0;
-
-	// Reset the proposer and acceptor out of paranoia.
-	paxos_proposer_reset();
-	paxos_acceptor_reset();
-
-	CLUSTERING_UNLOCK();
-
-	// Start clustering.
-	clustering_start();
-}
-
-/**
  * Stop clustering subsystem.
  */
 void

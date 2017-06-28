@@ -57,18 +57,6 @@
 #include "storage/storage.h"
 
 
-/*
- * AS_CLUSTER_LEGACY_SZ:  Historical hard-code maximum cluster size.
- * [Note:  This was the value of AS_CLUSTER_SZ in previous releases.]
- */
-#define AS_CLUSTER_LEGACY_SZ 32
-
-/*
- * AS_CLUSTER_DEFAULT_SZ:  Default maximum cluster size if not specified in the configuration.
- * [Note:  The legacy size is used for backward-compatibility with previous releases.]
- */
-#define AS_CLUSTER_DEFAULT_SZ (AS_CLUSTER_LEGACY_SZ)
-
 #define AS_STORAGE_MAX_DEVICES (64 - 1) // maximum devices per namespace
 #define AS_STORAGE_MAX_FILES (64 - 1) // maximum files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index

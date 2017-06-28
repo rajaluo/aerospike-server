@@ -149,7 +149,6 @@ cfg_set_defaults()
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
 	c->nsup_startup_evict = true;
-	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // TODO - has been deprecated - clean up
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
