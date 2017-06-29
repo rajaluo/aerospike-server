@@ -317,8 +317,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "sindex_ucgarbage_found", g_stats.query_false_positives);
 	info_append_uint64(db, "sindex_gc_locktimedout", g_stats.sindex_gc_timedout);
-	info_append_uint64(db, "sindex_gc_inactivity_dur", g_stats.sindex_gc_inactivity_dur);
-	info_append_uint64(db, "sindex_gc_activity_dur", g_stats.sindex_gc_activity_dur);
 	info_append_uint64(db, "sindex_gc_list_creation_time", g_stats.sindex_gc_list_creation_time);
 	info_append_uint64(db, "sindex_gc_list_deletion_time", g_stats.sindex_gc_list_deletion_time);
 	info_append_uint64(db, "sindex_gc_objects_validated", g_stats.sindex_gc_objects_validated);
@@ -1521,7 +1519,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "scan-threads", g_config.scan_threads);
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
-	info_append_bool(db, "sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram); // dynamic only
 	info_append_uint32(db, "sindex-gc-max-rate", g_config.sindex_gc_max_rate);
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
@@ -2296,16 +2293,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of enable-hist-info to %s", context);
 				g_config.info_hist_enabled = false;
 				histogram_clear(g_stats.info_hist);
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "sindex-gc-enable-histogram", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of sindex-gc-enable-histogram to %s", context);
-				g_config.sindex_gc_enable_histogram = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of sindex-gc-enable-histogram from to %s", context);
-				g_config.sindex_gc_enable_histogram = false;
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "query-microbenchmark", context, &context_len)) {

@@ -65,7 +65,6 @@ extern cf_queue *g_sindex_populateall_done_q;
 extern bool      g_sindex_boot_done;
 
 void as_sindex_thr_init();
-void as_sindex_gc_histogram_dumpall();
 objs_to_defrag_arr * as_sindex_gc_get_defrag_arr(void);
 
 #define MAX_SINDEX_BUILDER_THREADS 32
