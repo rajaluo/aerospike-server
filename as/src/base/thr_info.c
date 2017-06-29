@@ -4336,16 +4336,6 @@ info_node_info_tend()
 void *
 info_interfaces_fn(void *unused)
 {
-	pthread_mutex_lock(&g_serv_lock);
-	set_static_services();
-
-	if (g_config.tls_name != NULL) {
-		g_serv_tls_name = g_config.tls_name;
-	}
-
-	++g_serv_gen;
-	pthread_mutex_unlock(&g_serv_lock);
-
 	cf_ip_addr legacy[CF_SOCK_CFG_MAX];
 	uint32_t n_legacy = 0;
 
@@ -4838,6 +4828,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 			info_node_info *info;
 			pthread_mutex_t *vlock;
+			info_node_info info_to_tend = { 0 };
 
 			if (shash_get_vlock(g_info_node_info_hash, &node, (void **)&info, &vlock) == SHASH_OK) {
 				if (!compare_node_info_services(info_history, info)) {
@@ -4854,6 +4845,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 					cf_debug(AS_INFO, "Received request for info update from node %" PRIx64 " ~~ setting node's info generation to 0!", node);
 					info->generation = 0;
 					node_info_tend_required = true;
+					memcpy(&info_to_tend, info, sizeof(info_to_tend));
 				}
 
 				pthread_mutex_unlock(vlock);
@@ -4879,7 +4871,8 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			}
 
 			if (node_info_tend_required) {
-				info_node_info_tend();
+				// Send our service update to the source.
+				info_node_info_reduce_fn(&node, &info_to_tend, NULL);
 			}
 		}
 
@@ -6805,6 +6798,15 @@ as_info_init()
 	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), INFO_MSG_SCRATCH_SIZE, info_msg_fn, 0 /* udata */ );
 
 	as_exchange_register_listener(info_clustering_event_listener, NULL);
+
+	// Initialize services info exchange machinery.
+	set_static_services();
+
+	if (g_config.tls_name != NULL) {
+		g_serv_tls_name = g_config.tls_name;
+	}
+
+	++g_serv_gen;
 
 	pthread_t info_interfaces_th;
 	pthread_create(&info_interfaces_th, &thr_attr, info_interfaces_fn, 0);
