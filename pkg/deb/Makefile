@@ -97,6 +97,7 @@ else
 	install -pm 644 $(EEREPO)/LICENSE.EE $(OPT_AS)/doc/LICENSE
 endif
 	cat $(DEPTH)/LICENSE.3rdParty >> $(OPT_AS)/doc/LICENSE
+	install -pm 644 $(OPT_AS)/doc/LICENSE $(PKG)/packages
 
 ifeq ($(EDITION),community)
   ifeq ($(USE_SYSTEMD),1)
