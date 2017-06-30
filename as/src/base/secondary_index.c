@@ -1022,7 +1022,7 @@ void
 as_sindex_gconfig_default(as_config *c)
 {
 	c->sindex_builder_threads = 4;
-	c->sindex_gc_max_rate = 1000000; // 1 million per second
+	c->sindex_gc_max_rate = 50000; // 50,000 per second
 	c->sindex_gc_period = 10; // every 10 seconds
 }
 
