@@ -165,7 +165,7 @@ cfg_set_defaults()
 	as_sindex_gconfig_default(c);
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
-	c->debug_allocations = CF_ALLOC_DEBUG_TRANSIENT;
+	c->debug_allocations = CF_ALLOC_DEBUG_NONE;
 	c->fabric_dump_msgs = false;
 	c->max_msgs_per_type = -1; // by default, the maximum number of "msg" objects per type is unlimited
 
