@@ -124,6 +124,10 @@ hook_get_arena(const void *p)
 static void
 hook_check_arena(const void *p, int32_t arena)
 {
+	if (g_debug == CF_ALLOC_DEBUG_NONE) {
+		return;
+	}
+
 	int32_t arena_p = hook_get_arena(p);
 
 	if (arena < 0 && arena_p < N_ARENAS) {
