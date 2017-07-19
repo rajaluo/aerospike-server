@@ -767,9 +767,6 @@ as_batch_queue_task(as_transaction* btr)
 		// Copy transaction data before memory gets overwritten.
 		in = (as_batch_input*)data;
 
-		tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
-		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
-
 		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		tr.keyd = in->keyd;
@@ -785,6 +782,9 @@ as_batch_queue_task(as_transaction* btr)
 			tr.msgp = prev_msgp;
 		}
 		else {
+			tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
+			as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+
 			// Row contains full namespace/bin names.
 			out = (cl_msg*)data;
 
