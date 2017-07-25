@@ -747,11 +747,10 @@ as_batch_queue_task(as_transaction* btr)
 	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
 
-	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
-
 	// Read batch keys and initialize generic transactions.
 	as_batch_input* in;
 	cl_msg* out = 0;
+	bool is_prev_msgp = false;
 	as_msg_op* op;
 	uint32_t tran_row = 0;
 	uint8_t info = *data++;  // allow transaction inline.
@@ -769,12 +768,20 @@ as_batch_queue_task(as_transaction* btr)
 		in = (as_batch_input*)data;
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		memcpy(&tr.keyd, &in->keyd, sizeof(cf_digest));
+		tr.benchmark_time = btr->benchmark_time;
 
 		if (in->repeat) {
+			if (! is_prev_msgp) {
+				break; // bad bytes from client - repeat set on first item
+			}
+
 			// Row should use previous namespace and bin names.
 			data += BATCH_REPEAT_SIZE;
 		}
 		else {
+			tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
+			as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+
 			// Row contains full namespace/bin names.
 			out = (cl_msg*)data;
 
@@ -847,6 +854,7 @@ as_batch_queue_task(as_transaction* btr)
 			out->proto.type = PROTO_TYPE_AS_MSG;
 			out->proto.sz = (data - (uint8_t*)&out->msg);
 			tr.msgp = out;
+			is_prev_msgp = true;
 		}
 
 		if (data > limit) {
