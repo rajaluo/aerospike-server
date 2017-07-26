@@ -1879,6 +1879,10 @@ packed_map_add(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *key, con
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
+	if (has_offidx(&op)) {
+		offset_index_fill(&op.pmi.offset_idx, op.ele_count);
+	}
+
 	const cdt_payload *use_value = NULL;
 
 	map_ele_find find_key_to_remove;
@@ -2303,6 +2307,10 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 
 	offset_index_inita_from_op_if_invalid(&op.pmi.offset_idx, &op);
 
+	if (op_is_k_ordered(&op)) {
+		offset_index_fill(&op.pmi.offset_idx, op.ele_count);
+	}
+
 	uint32_t remove_array[items_count * 2];
 	const cdt_payload *use_value = NULL;
 	uint32_t ele_found = 0;
@@ -2395,6 +2403,8 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		prev = idx;
 		is_prev = false;
 	}
+
+	offset_index_fill(&op.pmi.offset_idx, op.ele_count); // ensure fill for unordered case
 
 	int ret = packed_map_remove_idxs(b, &op, alloc_buf, &rem_idx, ele_removed, NULL);
 
@@ -3782,6 +3792,10 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 {
 	offset_index_inita_from_op_if_invalid(&op->pmi.offset_idx, op);
 
+	if (op_is_k_ordered(op)) {
+		offset_index_fill(&op->pmi.offset_idx, op->ele_count);
+	}
+
 	map_ele_find find_key;
 	map_ele_find_init(&find_key, op);
 
@@ -3806,6 +3820,8 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 
 		return AS_PROTO_RESULT_OK;
 	}
+
+	offset_index_fill(&op->pmi.offset_idx, op->ele_count); // ensure fill for unordered case
 
 	uint32_t count = 1;
 	uint32_t remove_sz = find_key.size;
