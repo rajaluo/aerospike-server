@@ -584,6 +584,15 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 		return;
 	}
 
+	// 0 origin has been observed here during upgrade from 3.7.4 to 3.13.0.
+	// Adding defensive code until we understand how this could happen.
+	if (pr->rw || pr->origin == 0) {
+		cf_warning(AS_PROXY, "unexpected return to sender for ship-op tid %u rw %p origin %d from-flags %x",
+				tid, pr->rw, pr->origin, pr->from_flags);
+		pthread_mutex_unlock(lock);
+		return;
+	}
+
 	cf_node redirect_node;
 
 	if (msg_get_uint64(m, PROXY_FIELD_REDIRECT, &redirect_node) == 0
