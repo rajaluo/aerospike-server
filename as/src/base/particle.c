@@ -275,20 +275,14 @@ as_particle_asval_to_client(const as_val *val, as_msg_op *op)
 // Destructor, etc.
 //
 
-// TODO - shouldn't this set the bin state to UNUSED?
 void
 as_bin_particle_destroy(as_bin *b, bool free_particle)
 {
-	if (as_bin_is_embedded_particle(b)) {
-		b->particle = 0;
+	if (free_particle && as_bin_is_external_particle(b) && b->particle) {
+		particle_vtable[as_bin_get_particle_type(b)]->destructor_fn(b->particle);
 	}
-	else if (b->particle) {
-		if (free_particle) {
-			particle_vtable[as_bin_get_particle_type(b)]->destructor_fn(b->particle);
-		}
 
-		b->particle = 0;
-	}
+	b->particle = NULL;
 }
 
 uint32_t

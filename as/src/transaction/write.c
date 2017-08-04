@@ -159,7 +159,7 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 static inline void
 append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 {
-	if (as_bin_inuse(b) && ! as_bin_is_embedded_particle(b)) {
+	if (as_bin_is_external_particle(b)) {
 		bins[(*p_n_bins)++] = *b;
 	}
 }
@@ -1986,8 +1986,7 @@ write_master_dim_single_bin_unwind(as_bin* old_bin, as_bin* new_bin,
 {
 	as_particle* p_old = as_bin_get_particle(old_bin);
 
-	if (! as_bin_is_embedded_particle(new_bin) &&
-			new_bin->particle != p_old) {
+	if (as_bin_is_external_particle(new_bin) && new_bin->particle != p_old) {
 		as_bin_particle_destroy(new_bin, true);
 	}
 
