@@ -450,6 +450,11 @@ as_bin_is_embedded_particle(const as_bin *b) {
 			((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_FLOAT;
 }
 
+static inline bool
+as_bin_is_external_particle(const as_bin *b) {
+	return ((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_OTHER;
+}
+
 static inline as_particle *
 as_bin_get_particle(as_bin *b) {
 	return as_bin_is_embedded_particle(b) ? &b->iparticle : b->particle;
