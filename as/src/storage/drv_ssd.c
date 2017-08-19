@@ -77,7 +77,7 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 // Constants.
 //
 
-#define MAX_WRITE_BLOCK_SIZE	(1024 * 1024)
+#define MAX_WRITE_BLOCK_SIZE	(1024 * 1024 * 8)
 #define LOAD_BUF_SIZE			MAX_WRITE_BLOCK_SIZE // must be multiple of MAX_WRITE_BLOCK_SIZE
 
 // We round usable device/file size down to SSD_DEFAULT_HEADER_LENGTH plus a
@@ -85,7 +85,7 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 // may break backward compatibility since an old header with different size
 // could render the rounding ineffective. (There are backward compatibility
 // issues anyway if we think we need to change SSD_DEFAULT_HEADER_LENGTH...)
-#define SSD_DEFAULT_HEADER_LENGTH	(1024 * 1024)
+#define SSD_DEFAULT_HEADER_LENGTH	(1024 * 1024 * 8)
 #define SSD_HEADER_INFO_STRIDE		(128)
 
 #define DEFRAG_STARTUP_RESERVE	4
@@ -1827,7 +1827,7 @@ as_storage_summarize_wblock_stats(as_namespace *ns)
 	// Note: This is a sparse array that could be more efficiently stored.
 	// (In addition, ranges of block sizes could be binned together to
 	// compress the histogram, rather than using one bin per block size.)
-	uint32_t wb_hist[MAX_WRITE_BLOCK_SIZE] = { 0 };
+	uint32_t *wb_hist = cf_calloc(1, sizeof(uint32_t) * MAX_WRITE_BLOCK_SIZE);
 
 	for (uint32_t d = 0; d < ssds->n_ssds; d++) {
 		drv_ssd *ssd = &ssds->ssds[d];
@@ -1894,6 +1894,8 @@ as_storage_summarize_wblock_stats(as_namespace *ns)
 					wb_hist[i], (wb_hist[i] != 1 ? "s" : ""), i);
 		}
 	}
+
+	cf_free(wb_hist);
 }
 
 
@@ -2463,7 +2465,7 @@ as_storage_read_header(drv_ssd *ssd, as_namespace *ns,
 					ssd_name, header->version, SSD_VERSION);
 		}
 		else {
-			cf_warning(AS_DRV_SSD, "read_header: device %s bad version %u, not a current Citrusleaf drive",
+			cf_warning(AS_DRV_SSD, "read_header: device %s has unconvertible storage version %u",
 					ssd_name, header->version);
 			goto Fail;
 		}

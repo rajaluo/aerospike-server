@@ -3034,7 +3034,7 @@ as_config_init(const char* config_file)
 				ns->storage_scheduler_mode = cfg_strdup_one_of(&line, DEVICE_SCHEDULER_MODES, NUM_DEVICE_SCHEDULER_MODES);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE:
-				ns->storage_write_block_size = cfg_u32_no_checks(&line);
+				ns->storage_write_block_size = cfg_u32(&line, 1024 * 128, 1024 * 1024 * 8);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MEMORY_ALL:
 				cfg_renamed_name_tok(&line, "data-in-memory");

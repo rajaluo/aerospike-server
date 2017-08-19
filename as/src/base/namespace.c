@@ -194,7 +194,7 @@ as_namespace_create(char *name)
 
 	ns->storage_filesize = 1024LL * 1024LL * 1024LL * 16LL; // default file size is 16G per file
 	ns->storage_scheduler_mode = NULL; // null indicates default is to not change scheduler mode
-	ns->storage_write_block_size = 1024 * 1024;
+	ns->storage_write_block_size = 1024 * 1024 * 8; // this *is* a special build about 8M write blocks!
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%
 	ns->storage_defrag_queue_min = 0; // don't defrag unless the queue has this many eligible wblocks (0: defrag anything queued)
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock

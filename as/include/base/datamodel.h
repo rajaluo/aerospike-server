@@ -57,8 +57,8 @@
 #include "storage/storage.h"
 
 
-#define AS_STORAGE_MAX_DEVICES (64 - 1) // maximum devices per namespace
-#define AS_STORAGE_MAX_FILES (64 - 1) // maximum files per namespace
+#define AS_STORAGE_MAX_DEVICES (32) // maximum devices per namespace
+#define AS_STORAGE_MAX_FILES (32) // maximum files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
@@ -629,7 +629,7 @@ as_record_is_doomed(const as_record *r, struct as_namespace_s *ns)
 struct as_sindex_s;
 struct as_sindex_config_s;
 
-#define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
+#define AS_SET_MAX_COUNT 0xFF	// ID's 8 bits worth minus 1 (ID 0 means no set)
 #define AS_BINID_HAS_SINDEX_SIZE  MAX_BIN_NAMES / ( sizeof(uint32_t) * CHAR_BIT )
 
 #define  NS_READ_CONSISTENCY_LEVEL_NAME()								\

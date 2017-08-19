@@ -74,10 +74,10 @@ typedef struct as_index_s {
 	// offset: 47
 	// Used by the storage engines.
 	uint64_t rblock_id: 34;		// can address 2^34 * 128b = 2Tb drive
-	uint64_t n_rblocks: 14;		// is enough for 1Mb/128b = 8K rblocks
-	uint64_t file_id: 6;		// can spec 2^6 = 64 drives
+	uint64_t n_rblocks: 17;		// is enough for 8Mb/128b = 64K rblocks
+	uint64_t file_id: 5;		// can spec 2^5 = 32 drives
 
-	uint64_t set_id_bits: 10;	// do not use directly, used for set-ID
+	uint64_t set_id_bits: 8;	// do not use directly, used for set-ID
 
 	// offset: 55
 	// In single-bin mode for data-in-memory namespaces, this is cast to an

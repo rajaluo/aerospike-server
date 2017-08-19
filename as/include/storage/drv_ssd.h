@@ -60,7 +60,7 @@ struct drv_ssd_s;
 #endif
 
 #define SSD_HEADER_MAGIC	(0x4349747275730707L)
-#define SSD_VERSION			2
+#define SSD_VERSION			99 // special build - stay off the main sequence!
 // Must update conversion code when bumping version.
 //
 // SSD_VERSION history:
