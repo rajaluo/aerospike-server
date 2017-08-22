@@ -134,7 +134,9 @@ hook_check_arena(const void *p, int32_t arena)
 		return;
 	}
 
-	if (arena == arena_p) {
+	// The "arena" parameter is never < N_ARENAS.
+
+	if (arena >= N_ARENAS && arena_p >= N_ARENAS) {
 		return;
 	}
 
