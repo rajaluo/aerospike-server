@@ -61,6 +61,8 @@
 // Typedefs & constants.
 //
 
+#define STACK_LIMIT (1024 * 1024)
+
 typedef struct ldt_prole_info_s {
 	bool		replication_partition_version_match;
 	uint64_t	ldt_source_version;
@@ -1137,8 +1139,10 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		}
 	}
 
-	uint8_t stack_particles[stack_particles_sz + 256];
-	uint8_t* p_stack_particles = stack_particles;
+	uint32_t mem_sz = (uint32_t)stack_particles_sz + 256;
+	uint8_t stack_particles[mem_sz < STACK_LIMIT ? mem_sz : 1];
+	uint8_t* p_stack_particles = (mem_sz < STACK_LIMIT ? stack_particles : cf_malloc(mem_sz));
+	uint8_t* const p_particles_free = (mem_sz < STACK_LIMIT) ? NULL : p_stack_particles;
 	// + 256 for LDT control bin, to hold version.
 
 	if (! ldt_get_prole_version(rsv, keyd, linfo, info, &rd, is_create)) {
@@ -1148,6 +1152,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 		as_storage_record_close(&rd);
 		as_record_done(&r_ref, ns);
+		cf_free(p_particles_free);
 
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
@@ -1164,6 +1169,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 			as_index_delete(tree, keyd);
 			as_storage_record_close(&rd);
 			as_record_done(&r_ref, ns);
+			cf_free(p_particles_free);
 
 			return AS_PROTO_RESULT_FAIL_FORBIDDEN;
 		}
@@ -1177,6 +1183,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 		as_storage_record_close(&rd);
 		as_record_done(&r_ref, ns);
+		cf_free(p_particles_free);
 
 		return AS_PROTO_RESULT_FAIL_UNKNOWN; // TODO - better granularity?
 	}
@@ -1223,6 +1230,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
 	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
+	cf_free(p_particles_free);
 
 	// Don't send an XDR delete if it's disallowed.
 	if (is_durable_delete && ! is_xdr_delete_shipping_enabled()) {
