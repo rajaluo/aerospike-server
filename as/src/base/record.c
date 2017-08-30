@@ -51,6 +51,7 @@
 #include "transaction/delete.h"
 #include "transaction/rw_utils.h"
 
+#define STACK_LIMIT (1024 * 1024)
 
 void
 as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
@@ -545,8 +546,10 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 	}
 
 	// 256 as upper bound on the LDT control bin, we may write version below
-	uint8_t stack_particles[stack_particles_sz + 256]; // stack allocate space for new particles when data on device
+	uint32_t mem_sz = (uint32_t)stack_particles_sz + 256; // stack allocate space for new particles when data on device
+	uint8_t stack_particles[mem_sz < STACK_LIMIT ? mem_sz : 1];
 	uint8_t *p_stack_particles = stack_particles;
+	uint8_t * const p_particles_free = (mem_sz < STACK_LIMIT) ? NULL : p_stack_particles;
 
 	// Cleanup old info and put new info
 	as_record_set_properties(rd, &c->rec_props);
@@ -556,6 +559,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 
 		if (as_truncate_record_is_truncated(r, rd->ns)) {
 			as_storage_record_close(rd);
+			cf_free(p_particles_free);
 			return -8; // yes, another special return value
 		}
 	}
@@ -567,6 +571,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 	if (0 != rv) {
 		cf_warning_digest(AS_LDT, &rd->r->keyd, "Unpickled replace failed rv=%d",rv);
 		as_storage_record_close(rd);
+		cf_free(p_particles_free);
 		return rv;
 	}
 
@@ -588,6 +593,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 	as_record_apply_pickle(rd);
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 	as_storage_record_close(rd);
+	cf_free(p_particles_free);
 
 	return 0;
 }
